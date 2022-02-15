@@ -39,8 +39,11 @@ def get_overlaps(uf_value_storfs: list) -> list:
     # the objective function will be (max of) the sum of
     # all variables
     overlapping_groups = []
-
-    return
+    current_stop = None
+    for storf in uf_value_storfs:
+        if current_stop is None:
+            # current_stop =
+            return
 
 
 def filter(uf_value_storfs: list) -> list:
@@ -52,8 +55,6 @@ def filter(uf_value_storfs: list) -> list:
     prob = LpProblem("StORF Knapsack Problem", LpMaximize)
     # get overlapping StORFs
     overlapping_storfs = get_overlaps(uf_value_storfs)
-
-
 
 
 def read_fasta() -> list:
@@ -77,14 +78,21 @@ def get_values(unfiltered_storfs: dict):
     largest_storf = max(unfiltered_storfs, key=lambda x: len(x[1]))
     ls_len = len(largest_storf[1])  # largest storf length
     for storf in unfiltered_storfs:
-        storf.append(int(len(storf[1]))/ls_len)  # value of storf as a percentage ls_len
+        # value of storf as percentage of ls_len
+        storf.append(int(len(storf[1]))/ls_len)
+
+    # TODO implement additional heuristics for value of StORF
+    # GC content, overlap nt size, etc.
     return unfiltered_storfs
 
 
 def main():
     uf_storfs = read_fasta()
+    print(uf_storfs)
     uf_value_storfs = get_values(uf_storfs)
     filtered_storfs = filter(uf_value_storfs)
+
+    # output filtered StORFs to fasta file
 
 
 if __name__ == '__main__':
