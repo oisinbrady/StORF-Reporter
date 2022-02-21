@@ -5,6 +5,11 @@ import argparse
 FILTER_ARGS = None
 
 
+def is_allowed_storf_range(storf: list) -> bool:
+    storf_len = len(re.findall('[AGTC]', storf[1]))
+    return FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[0]
+
+
 def get_overlaps(uf_value_storfs: list) -> list:
     """
     Assign any StORFs that overlap on the genome into
@@ -26,8 +31,7 @@ def get_overlaps(uf_value_storfs: list) -> list:
         if overlap_num == 0:
             
             if FILTER_ARGS.storf_range:
-                storf_len = len(re.findall('[AGTC]', storf[1]))
-                if FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[0]:
+                if is_allowed_storf_range(storf):
                     group_i += 1
                     overlapping_groups.append([])
                     overlapping_groups[group_i].append(storf)
@@ -37,11 +41,12 @@ def get_overlaps(uf_value_storfs: list) -> list:
                 overlapping_groups[group_i].append(storf)
         else:
             if FILTER_ARGS.storf_range:
-                if FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[0]:
+                if is_allowed_storf_range(storf):
                     overlapping_groups[group_i].append(storf)
             else:
                 overlapping_groups[group_i].append(storf)
 
+    print(overlapping_groups)
     return overlapping_groups
 
 
