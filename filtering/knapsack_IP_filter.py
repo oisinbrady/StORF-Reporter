@@ -12,44 +12,36 @@ def get_overlaps(uf_value_storfs: list) -> list:
     will be used to create constraints in the integer
     program.
     """
-    overlapping_groups = [[]]
-    current_stop = None
-    group_i = 0
-
-    overlapping_storfs = 0
-    non_overlapping_storfs = 0
+    overlapping_groups = []
+    group_i = -1
     for storf in uf_value_storfs:
+        colon_delimiters = [s.start() for s in re.finditer(r":",storf[0])] 
+        pipe_delimiters = [s.start() for s in re.finditer(r"\|",storf[0])]
 
-
-        first_delim = (storf[0][15:(storf[0].index('|', storf[0].index('|') + 1 ))])
-        print(first_delim)
-
-        exit(0)
+        chromosome_UR_loci = (storf[0][colon_delimiters[1] + 1:pipe_delimiters[1]])
+        overlap_num = int(chromosome_UR_loci[len(chromosome_UR_loci) - 1])
         
-        stop = int(loci[(loci.index('-') + 1):])
-        if current_stop is None:
-            current_stop = stop
-            overlapping_groups[group_i].append(storf)
-            continue
-        # if overlap exists
-        elif stop <= current_stop:
-            overlapping_storfs += 1
-            #if FILTER_ARGS.overlap_range[0] <= (current_stop - stop) <= FILTER_ARGS.overlap_range[1]:
-                # add to current overlapping group
-            overlapping_groups[group_i].append(storf)
-        # no overlap
+        # TODO implement StORF overlap min max filtering
+        # if StORF is the start of a new overlapping group
+        if overlap_num == 0:
+            
+            if FILTER_ARGS.storf_range:
+                storf_len = len(re.findall('[AGTC]', storf[1]))
+                if FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[0]:
+                    group_i += 1
+                    overlapping_groups.append([])
+                    overlapping_groups[group_i].append(storf)
+            else:
+                group_i += 1
+                overlapping_groups.append([])
+                overlapping_groups[group_i].append(storf)
         else:
-            non_overlapping_storfs +=1
-            group_i += 1
-            overlapping_groups.append([storf])
-            current_stop = stop
+            if FILTER_ARGS.storf_range:
+                if FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[0]:
+                    overlapping_groups[group_i].append(storf)
+            else:
+                overlapping_groups[group_i].append(storf)
 
-    # print(overlapping_storfs)
-    print(non_overlapping_storfs)
-
-    print(non_overlapping_storfs/(overlapping_storfs+non_overlapping_storfs))
-
-    print(overlapping_groups)
     return overlapping_groups
 
 
@@ -162,8 +154,8 @@ def get_stats(filtered_storfs: list, uf_storfs: list) -> None:
     # !TODO what other stats could be useful?
     """
     # percentage of StORFs selected (optimality?)
-    print(f"{len(filtered_storfs)/len(uf_storfs) * 100} of "
-          f"total unfiltered StORFs selected")
+    #print(f"{len(filtered_storfs)/len(uf_storfs) * 100} of "
+    #      f"total unfiltered StORFs selected")
 
 
 def init_cl_args() -> argparse.ArgumentParser:
