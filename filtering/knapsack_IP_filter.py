@@ -29,7 +29,6 @@ def get_overlaps(uf_value_storfs: list) -> list:
         # TODO implement StORF overlap min max filtering
         # if StORF is the start of a new overlapping group
         if overlap_num == 0:
-            
             if FILTER_ARGS.storf_range:
                 if is_allowed_storf_range(storf):
                     group_i += 1
@@ -128,7 +127,7 @@ def get_values(unfiltered_storfs: list):
     """
     Define values for each StORF according to set run-time parameters
     """
-    # !TODO rewrite lenght attribute already exists with the storf meta data
+    # TODO rewrite lenght attribute already exists with the storf meta data
     largest_storf = max(unfiltered_storfs, key=lambda x: len(x[1]))
     ls_len = len(largest_storf[1])  # largest storf length
     # define value of each StORF
@@ -140,9 +139,10 @@ def get_values(unfiltered_storfs: list):
             # GC-content of each StORF
             value += len(re.findall('[GC]', storf[1])) / len(storf[1])
         # TODO add all filtering option's logic
+        # GC content, overlap nt size, etc.
         storf.append(value)
 
-    # GC content, overlap nt size, etc.
+    
     return unfiltered_storfs
 
 
@@ -152,32 +152,21 @@ def write_fasta(filtered_storfs: list) -> None:
         f.write(f"{storf[0]}{storf[1]}")
 
 
-def get_stats(filtered_storfs: list, uf_storfs: list) -> None:
-    """
-    Derive statistics from the filtered StORFs such as coverage
-    optimality run-time performance, graphs(?) etc.
-    # !TODO what other stats could be useful?
-    """
-    # percentage of StORFs selected (optimality?)
-    #print(f"{len(filtered_storfs)/len(uf_storfs) * 100} of "
-    #      f"total unfiltered StORFs selected")
-
-
 def init_cl_args() -> argparse.ArgumentParser:
     """
     Run-time parameters dictate the type(s) of filtering to take place
     """
+    # TODO add argument exceptions
     args = argparse.ArgumentParser(description='StORF filter options')
     args.add_argument('-olr', '--overlap_range', dest='overlap_range', 
                       nargs=2, metavar=('MIN', 'MAX'), type=int,
                       help="the min and max StORF overlap range (nt)"
                      )
-    # TODO add value exception condition/try-catch (default: 30, 100000)
+    # default ~ 30, 100000
     args.add_argument('-sr' ,'--storf_range', dest='storf_range', nargs=2,
                       metavar=("MIN","MAX"), type=int,
                       help="(default: 30, 100000) the min and max StORF size (nt)"
                      )
-    # TODO add value exception condition/try-catch (default: 10, 0)
     args.add_argument('-gc', '--gc_profile', dest='gc', nargs=2,
                       type=int, metavar=("VAR","TYPE"),
                       help='VAR: (default: 10) acceptable percentage range ' \
