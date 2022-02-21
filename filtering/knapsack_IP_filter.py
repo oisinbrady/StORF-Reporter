@@ -2,7 +2,7 @@ from pulp import LpVariable, LpProblem, LpMaximize, value, LpAffineExpression, L
 import re
 import argparse
 
-CONSOLE_ARGS = None
+FILTER_ARGS = None
 
 
 def get_overlaps(uf_value_storfs: list) -> list:
@@ -15,23 +15,41 @@ def get_overlaps(uf_value_storfs: list) -> list:
     overlapping_groups = [[]]
     current_stop = None
     group_i = 0
+
+    overlapping_storfs = 0
+    non_overlapping_storfs = 0
     for storf in uf_value_storfs:
-        loci = (storf[0][15:(storf[0].index('|'))])
-        stop = int(loci[loci.index('-') + 1:])
+
+
+        first_delim = (storf[0][15:(storf[0].index('|', storf[0].index('|') + 1 ))])
+        print(first_delim)
+
+        exit(0)
+        
+        stop = int(loci[(loci.index('-') + 1):])
         if current_stop is None:
             current_stop = stop
             overlapping_groups[group_i].append(storf)
             continue
         # if overlap exists
         elif stop <= current_stop:
-            # !TODO allow argparse to determine range of overlap allowed
-            # add to current overlapping group
+            overlapping_storfs += 1
+            #if FILTER_ARGS.overlap_range[0] <= (current_stop - stop) <= FILTER_ARGS.overlap_range[1]:
+                # add to current overlapping group
             overlapping_groups[group_i].append(storf)
         # no overlap
         else:
+            non_overlapping_storfs +=1
             group_i += 1
             overlapping_groups.append([storf])
             current_stop = stop
+
+    # print(overlapping_storfs)
+    print(non_overlapping_storfs)
+
+    print(non_overlapping_storfs/(overlapping_storfs+non_overlapping_storfs))
+
+    print(overlapping_groups)
     return overlapping_groups
 
 
@@ -56,7 +74,7 @@ def filter(uf_value_storfs: list) -> list:
     prob = LpProblem("StORF_Knapsack_Problem", LpMaximize)
     # initialise ip variables
     storf_ids = [f"x_{i}" for i in range(0, len(uf_value_storfs))]
-    ip_vars = [LpVariable(storf_ids[i], lowBound=0, upBound=1) for i in range(0, len(uf_value_storfs))]
+    ip_vars = [LpVariable(storf_ids[i], lowBound=0, upBound=1, cat='Integer') for i in range(0, len(uf_value_storfs))]
     # get overlapping StORFs
     overlapping_storf_groups = get_overlaps(uf_value_storfs)
 
@@ -98,36 +116,33 @@ def filter(uf_value_storfs: list) -> list:
 
 def read_fasta() -> list:
     unfiltered_storfs = []
-    with open("../../testout/E-coli_output_no_filt.fasta") as storf_file:
+    with open("../../testout/smallstorftest.fasta") as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
+    #with open("../../testout/E-coli_output_no_filt.fasta") as storf_file:
+    #    for line in storf_file:
+    #        if line[0] == ">":
+    #            unfiltered_storfs.append([line, next(storf_file)])
     return unfiltered_storfs
 
 
 def get_values(unfiltered_storfs: list):
     """
-    Heuristically defined value for each storf within the range 0-1
+    Define values for each StORF according to set run-time parameters
     """
     # !TODO rewrite lenght attribute already exists with the storf meta data
     largest_storf = max(unfiltered_storfs, key=lambda x: len(x[1]))
     ls_len = len(largest_storf[1])  # largest storf length
-    # assess the value of each StORF
+    # define value of each StORF
     for storf in unfiltered_storfs:
-        # !TODO implement additional heuristics for value of StORF
-
-        # This is currently very naive
-        # should the program only value according to one
-        # how are we to weigh each characteristic?
-        # should certain scores take more precedent or are all to
-        # be treated equally?
-
-        # value of storf as percentage of ls_len
-        length_score = int(len(storf[1]))/ls_len
-        # GC percentage
-        gc_score = len(re.findall('[GC]', storf[1])) / len(storf[1])
-
-        value = length_score + gc_score
+        value = 0
+        if FILTER_ARGS.storf_len:
+            value += int(len(storf[1]))/ls_len
+        if FILTER_ARGS.simple_gc:
+            # GC-content of each StORF
+            value += len(re.findall('[GC]', storf[1])) / len(storf[1])
+        # TODO add all filtering option's logic
         storf.append(value)
 
     # GC content, overlap nt size, etc.
@@ -152,16 +167,47 @@ def get_stats(filtered_storfs: list, uf_storfs: list) -> None:
 
 
 def init_cl_args() -> argparse.ArgumentParser:
+    """
+    Run-time parameters dictate the type(s) of filtering to take place
+    """
     args = argparse.ArgumentParser(description='StORF filter options')
-    args.add_argument('-mino', '--minoverlap', action="store",
-                      dest='min_o', default=0, type=int,
-                      help='default=0: Minimum StORF overlap in nt')
-    args.add_argument('-maxol', '--maxoverlap', action="store",
-                      dest='maxo', default=0, type=int,
-                      help='default=0: Maximum StORF overlap in nt')
-    args.parse_args()
-    global CONSOLE_ARGS
-    CONSOLE_ARGS = args
+    args.add_argument('-olr', '--overlap_range', dest='overlap_range', 
+                      nargs=2, metavar=('MIN', 'MAX'), type=int,
+                      help="the min and max StORF overlap range (nt)"
+                     )
+    # TODO add value exception condition/try-catch (default: 30, 100000)
+    args.add_argument('-sr' ,'--storf_range', dest='storf_range', nargs=2,
+                      metavar=("MIN","MAX"), type=int,
+                      help="(default: 30, 100000) the min and max StORF size (nt)"
+                     )
+    # TODO add value exception condition/try-catch (default: 10, 0)
+    args.add_argument('-gc', '--gc_profile', dest='gc', nargs=2,
+                      type=int, metavar=("VAR","TYPE"),
+                      help='VAR: (default: 10) acceptable percentage range ' \
+                      "TYPE: (default: 0) 0=mean, 1=median, 2=mode"
+                     )
+    args.add_argument('-sgc' ,'--simple_gc', dest='simple_gc', action='store_true',
+                      help='filter favouring highest GC content StORFs when choosing between overlaps'
+                     )
+    args.add_argument('-sct', '--stop_codon_type', dest='stop_codon_type', nargs='?',
+                      choices=('UAG', 'UGA', 'UAA'), help='filter StORFs delimited by ' \
+                      'one or more of the selected stop codons'
+                     ) 
+    args.add_argument('-asct', '--average_stop_codon', dest='stop_codon_av',
+                      metavar=("TYPE"), type=int, 
+                      help=" TYPE: (default: 0) 0=mean, 1=median, 2=mode"
+                     )
+    args.add_argument('-slen', '--storf_length', dest="storf_len", action='store_true',
+                     help="favour selection of largest StORF in overlapping StORF groups"
+                     )
+
+
+    global FILTER_ARGS
+    FILTER_ARGS = args.parse_args()
+    if not (FILTER_ARGS.overlap_range or FILTER_ARGS.storf_range or FILTER_ARGS.simple_gc
+            or FILTER_ARGS.gc or FILTER_ARGS.stop_codon_type or FILTER_ARGS.stop_codon_av
+            or FILTER_ARGS.storf_len):
+        args.error("No filtering options provided")
 
 
 def main():
