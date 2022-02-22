@@ -10,6 +10,38 @@ def is_allowed_storf_range(storf: list) -> bool:
     return FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[1]
 
 
+def get_storf_delim(storf: list) -> list:
+    colon_delimiters = [s.start() for s in re.finditer(r":",storf[0])] 
+    pipe_delimiters = [s.start() for s in re.finditer(r"\|",storf[0])]
+    return colon_delimiters, pipe_delimiters
+
+
+def is_allowed_storf_overlap(storf_index: int, group: list) -> bool:
+    # TODO
+    """
+    check if StORF satisfies overlap constraints
+    """
+    min_o = FILTER_ARGS.overlap_range[0]
+    max_o = FILTER_ARGS.overlap_range[1]
+    colon_delimiters, pipe_delimiters = get_storf_delim(uf_value_storfs[storf_index])
+    # the actual location of the StORF w.r.t the UR it is on
+    storf_act_loci = uf_value_storfs[storf_index][0][colon_delimiters[0]:pipe_delimiters[0]]
+    # get stop location of StORF
+    stop = int(storf_act_loci[(storf_act_loci.index('-')+1):])
+    # get start location of StORF
+    start = int(storf_act_loci[1:(storf_act_loci.index('-'))])
+    for i in range(storf_index + 1, len(group) - 1):
+        # get loci of current storf
+        colon_delimiters, pipe_delimiters = get_storf_delim(group[i])
+        uf_value_storfs[i][0][colon_delimiters[0]:pipe_delimiters[0]]
+        next_start = int(group[i][0][])
+
+        # if OVERLAP MIN <= stop - next start >= OVERLAP_MAX
+        if not min_o <= stop - next_start <= max_o:
+            return false
+
+
+
 def get_overlaps(uf_value_storfs: list) -> list:
     """
     Assign any StORFs that overlap on the genome into
@@ -17,27 +49,34 @@ def get_overlaps(uf_value_storfs: list) -> list:
     will be used to create constraints in the integer
     program.
     """
-    overlapping_groups = [[]]
+    overlapping_groups = []
     group_i = -1
-    for storf in uf_value_storfs:
-        colon_delimiters = [s.start() for s in re.finditer(r":",storf[0])] 
-        pipe_delimiters = [s.start() for s in re.finditer(r"\|",storf[0])]
-        # the location of the StORF
-        chromosome_UR_loci = (storf[0][colon_delimiters[1] + 1:pipe_delimiters[1]])
+    for index, storf in enumerate(uf_value_storfs):
+        colon_delimiters, pipe_delimiters = get_storf_delim(storf)
+        # the location of the StORF relative to its overlaps
+        chromosome_rel_loci = (storf[0][colon_delimiters[1] + 1:pipe_delimiters[1]])
         # get _x at end of StORF location indicating its position in overlapping group
-        overlap_num = int(chromosome_UR_loci[len(chromosome_UR_loci) - 1])
+        overlap_num = int(chromosome_rel_loci[len(chromosome_rel_loci) - 1])
         # select StORF dependent on its length constraints
         selected = True
         if FILTER_ARGS.storf_range:
             selected = is_allowed_storf_range(storf)
         if selected:
-            # if StORF is the start of a new overlapping group
+            # iff StORF is the start of a new overlapping group
             if overlap_num == 0:
+                overlapping_groups.append([])
                 group_i += 1
             overlapping_groups[group_i].append(storf)
 
-    # TODO implement StORF overlap min max filtering
 
+    if FILTER_ARGS.overlap_range:
+        # remove any StORFs not within the overlap constraints
+        for i, group in enumerate(overlapping_groups):
+            for j, storf in enumerate(group):
+                if not is_allowed_storf_overlap(j, group):
+                    del overlapping_groups[i][j] 
+
+    
     # print(overlapping_groups)
     return overlapping_groups
 
@@ -126,8 +165,12 @@ def get_values(unfiltered_storfs: list):
     # define value of each StORF
     for storf in unfiltered_storfs:
         value = 0
+
+        # TODO make this the default behaviour
         if FILTER_ARGS.storf_len:
             value += int(len(storf[1]))/ls_len
+
+
         if FILTER_ARGS.simple_gc:
             # GC-content of each StORF
             value += len(re.findall('[GC]', storf[1])) / len(storf[1])
