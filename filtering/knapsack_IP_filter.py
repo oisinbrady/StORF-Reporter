@@ -7,7 +7,7 @@ FILTER_ARGS = None
 
 def is_allowed_storf_range(storf: list) -> bool:
     storf_len = len(re.findall('[AGTC]', storf[1]))
-    return FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[0]
+    return FILTER_ARGS.storf_range[0] <= storf_len <= FILTER_ARGS.storf_range[1]
 
 
 def get_overlaps(uf_value_storfs: list) -> list:
@@ -17,35 +17,28 @@ def get_overlaps(uf_value_storfs: list) -> list:
     will be used to create constraints in the integer
     program.
     """
-    overlapping_groups = []
+    overlapping_groups = [[]]
     group_i = -1
     for storf in uf_value_storfs:
         colon_delimiters = [s.start() for s in re.finditer(r":",storf[0])] 
         pipe_delimiters = [s.start() for s in re.finditer(r"\|",storf[0])]
-
+        # the location of the StORF
         chromosome_UR_loci = (storf[0][colon_delimiters[1] + 1:pipe_delimiters[1]])
+        # get _x at end of StORF location indicating its position in overlapping group
         overlap_num = int(chromosome_UR_loci[len(chromosome_UR_loci) - 1])
-        
-        # TODO implement StORF overlap min max filtering
-        # if StORF is the start of a new overlapping group
-        if overlap_num == 0:
-            if FILTER_ARGS.storf_range:
-                if is_allowed_storf_range(storf):
-                    group_i += 1
-                    overlapping_groups.append([])
-                    overlapping_groups[group_i].append(storf)
-            else:
+        # select StORF dependent on its length constraints
+        selected = True
+        if FILTER_ARGS.storf_range:
+            selected = is_allowed_storf_range(storf)
+        if selected:
+            # if StORF is the start of a new overlapping group
+            if overlap_num == 0:
                 group_i += 1
-                overlapping_groups.append([])
-                overlapping_groups[group_i].append(storf)
-        else:
-            if FILTER_ARGS.storf_range:
-                if is_allowed_storf_range(storf):
-                    overlapping_groups[group_i].append(storf)
-            else:
-                overlapping_groups[group_i].append(storf)
+            overlapping_groups[group_i].append(storf)
 
-    print(overlapping_groups)
+    # TODO implement StORF overlap min max filtering
+
+    # print(overlapping_groups)
     return overlapping_groups
 
 
@@ -202,8 +195,6 @@ def main():
     uf_value_storfs = get_values(uf_storfs)
     filtered_storfs = filter(uf_value_storfs)
     write_fasta(filtered_storfs)
-    get_stats(filtered_storfs, uf_storfs)
-
 
 if __name__ == '__main__':
     main()
