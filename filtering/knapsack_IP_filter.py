@@ -66,7 +66,6 @@ def ip_set_overlap_range(prob: LpProblem, storf_group: list, ip_vars: list, ip_v
         storf_2_start = int(storf_2_loci[:storf_2_loci.index('-')])
         
         # if overlap, apply constraints
-        # TODO REFACTOR - MIN CONSTRAINT NOT WORKING PROPERLY
         if storf_1_stop - storf_2_start > 0:
             # determine the IP variable IDs
             id_1 = s_pair_ids[index][0] + ip_var_id
@@ -163,7 +162,6 @@ def ip_filter(uf_value_storfs: list) -> list:
     prob = LpProblem("StORF_Knapsack_Problem", LpMaximize)
     # initialise IP variables with bounds
 
-    # TODO make bound low=0, upper=1 if filtering for specific stop codons and storf stop codon is not allowed
     storf_ids = [f"x_{i}" for i in range(0, len(uf_value_storfs))]
     ip_vars = [LpVariable(storf_ids[i], lowBound=0, upBound=1, cat='Integer') for i in range(0, len(uf_value_storfs))]
     
