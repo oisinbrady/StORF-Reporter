@@ -4,7 +4,7 @@ import re
 import itertools
 
 class HARD_FILTER(Enum):
-    overlap_range = [67, 1000]
+    overlap_range = [0, 1000]  #67, 1000
     size_range = [0, 100]
     gc_range = [0, 2]  # 10=percentage variance, 0=mean, 1=median, 2=mode
 
@@ -54,6 +54,22 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     return storf_group_values
 
 
+def filter_by_size_range(storf_group_values: list, storf_group: list) -> list:
+    return storf_group_values
+
+
+def filter_by_gc_range(storf_group_values: list, storf_group: list) -> list:
+    return storf_group_values
+
+
+def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
+    return storf_group_values
+
+
+def filter_favour_gc_percentage(storf_group_values: list, storf_group: list) -> list:
+    return storf_group_values
+
+
 def set_group_values(storf_group: list) -> list:
     # default value is of StORF is 1 
     # If restrictions clash then overwrite offending StORF value with 0
@@ -61,13 +77,24 @@ def set_group_values(storf_group: list) -> list:
 
     #print("before")
     #print(storf_group_values)
-    
-    if HARD_FILTER.overlap_range.value is not None and len(storf_group_values) != 1:
-        storf_group_values = filter_by_overlap(storf_group_values, storf_group)
-    
+    if len(storf_group_values) != 1:
+        if HARD_FILTER.overlap_range.value is not None:
+            storf_group_values = filter_by_overlap(storf_group_values, storf_group)
+            
+        #TODO# if HARD_FILTER.size_range.value is not None:
+            # storf_group_values = filter_by_size_range(storf_group_values, storf_group)
+
+        #TODO# if HARD_FILTER.gc_range.value is not None:
+            # storf_group_values = filter_by_gc_range(storf_group_values, storf_group)
+        
+        #TODO# if SOFT_FILTER.storf_length.value is not None:
+            # storf_group_values = filter_favour_length(storf_group_values, storf_group)
+
+        #TODO# if SOFT_FILTER.gc_length.value is not None:
+            # storf_group_values = filter_favour_gc_percentage(storf_group_values, storf_group)
+
     #print("after")
     #print(storf_group_values)
-    
     return storf_group_values
 
 
@@ -101,6 +128,15 @@ def write_fasta(filtered_storfs: list) -> None:
         f.write(f"{storf[0]}{storf[1]}")
 
 
+def ip_set_obj_func(prob: pulp.LpProblem, obj_variables: list, ip_vars: list) -> None:
+    obj_expression = []
+    for variable in obj_variables:
+        obj_expression.append((ip_vars[variable[0]], variable[1]))
+    e = pulp.LpAffineExpression(obj_expression)
+    # add objective function (in turn, adds variable bounds)
+    prob += e
+
+
 def ip_filter(storfs: list) -> list:
 
     # N.B., Weight of each StORF = 1
@@ -118,36 +154,33 @@ def ip_filter(storfs: list) -> list:
     group = []  # overlapping group of StORFs
     same_group = True
     obj_variables = []
-    # create objective function (and init vars)
+    # determine values of future IP variables
     for storf in storfs:
+        # many StORF values are dependent on their group
         if is_new_group(storf, s, s_total):
-            # TODO # ILP stuff on previous group #
-            
             obj_variables += set_group_values(group)
             group = [(s, storf)]  # init new group
         else:
             group.append((s, storf))
-        s+=1
-        
-    # add value to last group  
+        s+=1 
+    # add values to last group of StORFs...  
     obj_variables += set_group_values(group)
 
-    obj_expression = []
-    for variable in obj_variables:
-        obj_expression.append((ip_vars[variable[0]], variable[1]))
+    # construct objective function
+    ip_set_obj_func(prob, obj_variables, ip_vars)
     
-    e = pulp.LpAffineExpression(obj_expression)
-    prob += e
-    prob.solve()
+
+    # TODO # Add knapsack constraints C_t, C_k
 
     # get selected StORFs from IP solution
+    prob.solve()
     selected = []
-    for var in prob.variables():
-        print(f"{var}={pulp.value(var)}")
+    for i, var in enumerate(prob.variables()):
+        print(f"{i}={pulp.value(var)}")
+
         if pulp.value(var) == 1.0:
-            selected.append(var.name)
-    print(selected)
-    return storfs
+            selected.append(storfs[i])
+    return selected
 
 
 def main():
