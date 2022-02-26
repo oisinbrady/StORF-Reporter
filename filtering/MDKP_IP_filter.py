@@ -19,8 +19,8 @@ class SOFT_FILTER(Enum):
 
 
 class WEIGHT_CONSTRAINTS(Enum):
-    # knapsack constraints, -1=infinity, AMAP
-    sum_total = 1  # of all StORF group total weights
+    # knapsack constraints, default should be -1=infinity, i.e., AMAP
+    sum_total = -1  # of all StORF group total weights
     storf_group = -1
 
 
@@ -163,11 +163,11 @@ def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
     if WEIGHT_CONSTRAINTS.sum_total.value == -1:
         return
     else:
-        C_k = WEIGHT_CONSTRAINTS.sum_total.value
+        C_t = WEIGHT_CONSTRAINTS.sum_total.value
         g = [(i,1) for i in ip_vars]
         e = pulp.LpAffineExpression(g)
-        # RHS: <= C_k
-        c = pulp.LpConstraint(e, -1, f"external_knapsack_constraint", C_k)
+        # RHS: <= C_t
+        c = pulp.LpConstraint(e, -1, f"external_knapsack_constraint", C_t)
         prob += c
 
 
