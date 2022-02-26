@@ -170,6 +170,7 @@ def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
         c = pulp.LpConstraint(e, -1, f"external_knapsack_constraint", C_k)
         prob += c
 
+
 def ip_filter(storfs: list) -> list:
 
     # N.B.: Weight of each StORF = 1,
@@ -181,13 +182,13 @@ def ip_filter(storfs: list) -> list:
     s_total = len(storfs)
     g = 0  # group id
     s = 0  # storf id
-    # initialise ILP variables
+    # Create IP variables
     storf_ids = [f"x_{s}" for s in range(0, s_total)]
     ip_vars = [pulp.LpVariable(storf_ids[i], lowBound=0, upBound=1, cat='Integer') for i in range(0, s_total)]
     group = []  # overlapping group of StORFs
     same_group = True
     obj_variables = []
-    # determine values of future IP variables
+    # determine coefficient values of future IP variables
     for storf in storfs:
         # many StORF values are dependent on their group
         if is_new_group(storf, s, s_total):
@@ -201,10 +202,10 @@ def ip_filter(storfs: list) -> list:
         s+=1
     # add values to last group of StORFs...  
     obj_variables += set_group_values(group)
-    # set constraint for last group
+    # set constraint for last group (auto-adds IP variable bounds)
     ip_set_group_constraint(prob, ip_vars, group, g)
 
-    # construct objective function
+    # construct objective function (auto-adds IP variable bounds)
     ip_set_obj_func(prob, obj_variables, ip_vars)
     
     # Add knapsack sum constraint

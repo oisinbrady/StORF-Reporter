@@ -73,6 +73,14 @@ def ip_set_storf_range(prob: LpProblem, storf_group: list, ip_vars: list, ip_var
     storf_max = FILTER_ARGS.storf_range[1]
     for storf in storf_group:
         storf_len = len(re.findall('[AGTC]', storf[1]))
+
+        # TODO need to change no_overlap_constraint 
+
+        # storf must be selected ...
+        prob += ip_vars[ip_var_id] <= 1
+        prob += ip_vars[ip_var_id] >= 1
+        
+        # ... AND within range
         prob += ip_vars[ip_var_id] * storf_len <= storf_max
         prob += ip_vars[ip_var_id] * storf_len >= storf_min
         ip_var_id += 1
@@ -83,9 +91,10 @@ def ip_set_overlap_range(prob: LpProblem, storf_group: list, ip_vars: list, ip_v
     overlap_max = FILTER_ARGS.overlap_range[1]
     # get each StORF pair combination, c, from the group
     s_pair_combination = [i for i in itertools.combinations(storf_group, 2)]  # combinations in order
-    s_pair_ids = [i for i in itertools.combinations([j for j in range(0, len(storf_group))], 2)] 
+    s_pair_ids = [i for i in itertools.combinations([j+ip_var_id for j in range(0, len(storf_group))], 2)] 
 
     for index, s_pair in enumerate(s_pair_combination):
+        #print(index)
         # for each s_pair, get s_pair[0].stop, s_pair[1].start
         # get stop location of StORF 1
         s1_colon_delimiters, s1_pipe_delimiters = get_storf_delim(s_pair[0])
@@ -97,14 +106,31 @@ def ip_set_overlap_range(prob: LpProblem, storf_group: list, ip_vars: list, ip_v
         storf_2_loci = s_pair[1][0][s2_colon_delimiters[0] + 1:s2_pipe_delimiters[0]]
         storf_2_start = int(storf_2_loci[:storf_2_loci.index('-')])
         
+        id_1 = s_pair_ids[index][0]
+        id_2 = s_pair_ids[index][1]
+        # sum of both vars must be 2
+        prob += ip_vars[id_1] + ip_vars[id_2] <= 1
+        prob += ip_vars[id_1] >= 1
+        # 
+        prob += ip_vars[id_1] * storf_1_stop - ip_vars[id_2] * storf_2_start <= overlap_max
+        prob += (ip_vars[id_1] * storf_1_stop) - (ip_vars[id_2] * storf_2_start) >= overlap_min
+
         # if overlap, apply constraints
-        if storf_1_stop - storf_2_start > 0:
-            # determine the IP variable IDs
-            id_1 = s_pair_ids[index][0] + ip_var_id
-            id_2 = s_pair_ids[index][1] + ip_var_id
+        #if storf_1_stop - storf_2_start > 0:
+         #   # determine the IP variable IDs
+          #  id_1 = s_pair_ids[index][0]
+           # id_2 = s_pair_ids[index][1]
+            #if storf_1_stop - storf_2_start >= overlap_min:
+             #   if storf_1_stop - storf_2_start <= overlap_max:
+              #      print(f"pair: ({id_1},{id_2}) is within range")
             # CONSTRAINTS (1) & (2): overlap must be within range
-            prob += ip_vars[id_1] * storf_1_stop - ip_vars[id_2] * storf_2_start <= overlap_max
-            prob += (ip_vars[id_1] * storf_1_stop) - (ip_vars[id_2] * storf_2_start) >= overlap_min
+            # TODO REAMAKE CONSTRAINTS
+            # both storf variables must be selected
+            #prob += ip_vars[id_1] + ip_vars[id_2] <= 2
+            #prob += ip_vars[id_1] + ip_vars[id_2] >= 2
+            # AND within overlap range
+            #prob += ip_vars[id_1] * storf_1_stop - ip_vars[id_2] * storf_2_start <= overlap_max
+           # prob += (ip_vars[id_1] * storf_1_stop) - (ip_vars[id_2] * storf_2_start) >= overlap_min
             
     
 def ip_set_no_overlaps(prob: LpProblem, storf_group: list, ip_vars: list, ip_var_id: int, group_id: int) -> None:
@@ -113,6 +139,7 @@ def ip_set_no_overlaps(prob: LpProblem, storf_group: list, ip_vars: list, ip_var
     e = LpAffineExpression(cg)
     # ensure only one StORF selected in group therefore RHS: <= 1
     c = LpConstraint(e, -1, f"no_overlap_constraint(group {group_id})", 1)
+    #c = LpConstraint(e, 1, f"no_overlap_constraint(group {group_id})", 1)
     prob += c
 
 
@@ -212,7 +239,8 @@ def ip_filter(uf_value_storfs: list) -> list:
     # get selected StORFs from IP solution
     selected = []
     for var in prob.variables():
-        if value(var) == 1:
+        print(f"{var}={value(var)}")
+        if value(var) == 1.0:
             selected.append(storf_dict[int(var.name[2:])])
     return selected
 
@@ -230,7 +258,7 @@ def read_fasta() -> list:
 
 
 def write_fasta(filtered_storfs: list) -> None:
-    f = open("../../testout/filtered_StORFs.fasta", "w")
+    f = open("../../testout/oisin_output/output.fasta", "w")
     for storf in filtered_storfs:
         f.write(f"{storf[0]}{storf[1]}")
 
