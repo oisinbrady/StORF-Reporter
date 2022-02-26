@@ -10,14 +10,18 @@ class HARD_FILTER(Enum):
 
 
 class SOFT_FILTER(Enum):
+    # usefull if hard filters return more candidates for a group than what 
+    # the storf_group constraint allows, this will then try to favour selection
+    # based of largest length, gc-content, etc.
+    # (by increasing the value of the obj var coefficient)
     storf_length = False  # True=favour the largest StORFs (more value) in groups
     gc_length = False  # True=favour the StORFs with highest gc% (more value) in groups
 
 
 class WEIGHT_CONSTRAINTS(Enum):
     # knapsack constraints, -1=infinity, AMAP
-    sum_total = -1  # of all StORF group total weights
-    storf_group = -1  
+    sum_total = 1  # of all StORF group total weights
+    storf_group = -1
 
 
 def get_storf_delim(storf: list) -> list:
@@ -80,7 +84,7 @@ def set_group_values(storf_group: list) -> list:
     if len(storf_group_values) != 1:
         if HARD_FILTER.overlap_range.value is not None:
             storf_group_values = filter_by_overlap(storf_group_values, storf_group)
-            
+
         #TODO# if HARD_FILTER.size_range.value is not None:
             # storf_group_values = filter_by_size_range(storf_group_values, storf_group)
 
@@ -137,11 +141,40 @@ def ip_set_obj_func(prob: pulp.LpProblem, obj_variables: list, ip_vars: list) ->
     prob += e
 
 
+def ip_set_group_constraint(prob: pulp.LpProblem, ip_vars: list, group: list, group_id: int) -> None:
+    if WEIGHT_CONSTRAINTS.storf_group.value == -1:
+        # iff infinity (i.e. AMAP StORFs in each group), no need for constraint
+        return
+    else:
+        # constraint group, where weight of each var = 1
+        C_g = WEIGHT_CONSTRAINTS.storf_group.value
+        g = []
+        for i, storf in enumerate(group):
+            g.append((ip_vars[storf[0]], 1))
+        e = pulp.LpAffineExpression(g)
+        # RHS: <= C_g
+        c = pulp.LpConstraint(e, -1, f"internal_knapsack_constraint_{group_id}", C_g)
+        prob += c
+
+
+def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
+    # constrain the sum of all knapsack weights 
+    # I.e, of all StORFs in file to be selected
+    if WEIGHT_CONSTRAINTS.sum_total.value == -1:
+        return
+    else:
+        C_k = WEIGHT_CONSTRAINTS.sum_total.value
+        g = [(i,1) for i in ip_vars]
+        e = pulp.LpAffineExpression(g)
+        # RHS: <= C_k
+        c = pulp.LpConstraint(e, -1, f"external_knapsack_constraint", C_k)
+        prob += c
+
 def ip_filter(storfs: list) -> list:
 
-    # N.B., Weight of each StORF = 1
-    # C_t = cap of all StORFs e.g., how many StORFs can be selected total
-    # C_k = cap selection for each StORF group (sub-knapsack)   
+    # N.B.: Weight of each StORF = 1,
+    # C_t = cap of all StORFs e.g., how many StORFs can be selected total,
+    # C_k = cap selection for each StORF group (sub-knapsack). 
 
     # initialise IP instance
     prob = pulp.LpProblem("StORF_IP_Filter", pulp.LpMaximize)
@@ -159,21 +192,27 @@ def ip_filter(storfs: list) -> list:
         # many StORF values are dependent on their group
         if is_new_group(storf, s, s_total):
             obj_variables += set_group_values(group)
+            # add weight constraint to each group
+            ip_set_group_constraint(prob, ip_vars, group, g)
             group = [(s, storf)]  # init new group
+            g += 1
         else:
             group.append((s, storf))
-        s+=1 
+        s+=1
     # add values to last group of StORFs...  
     obj_variables += set_group_values(group)
+    # set constraint for last group
+    ip_set_group_constraint(prob, ip_vars, group, g)
 
     # construct objective function
     ip_set_obj_func(prob, obj_variables, ip_vars)
     
-
-    # TODO # Add knapsack constraints C_t, C_k
+    # Add knapsack sum constraint
+    ip_set_total_constraint(prob, ip_vars)
 
     # get selected StORFs from IP solution
     prob.solve()
+    print(prob)
     selected = []
     for i, var in enumerate(prob.variables()):
         print(f"{i}={pulp.value(var)}")
