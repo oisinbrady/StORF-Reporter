@@ -2,11 +2,12 @@ from enum import Enum
 import pulp
 import re
 import itertools
+import collections
 
 class HARD_FILTER(Enum):
-    overlap_range = [0, 1000]  #67, 1000
-    size_range = [0, 100]
-    gc_range = [0, 2]  # 10=percentage variance, 0=mean, 1=median, 2=mode
+    overlap_range = [0, 50] # default [0, 50]  #67, 1000
+    size_range = [100, 50000] # default [100, 50000]
+    gc_range = None# [1000, 0]  # 10=percentage variance, 0=mean, 1=median, 2=mode
 
 
 class SOFT_FILTER(Enum):
@@ -14,8 +15,10 @@ class SOFT_FILTER(Enum):
     # the storf_group constraint allows, this will then try to favour selection
     # based of largest length, gc-content, etc.
     # (by increasing the value of the obj var coefficient)
-    storf_length = False  # True=favour the largest StORFs (more value) in groups
-    gc_length = False  # True=favour the StORFs with highest gc% (more value) in groups
+
+    # TODO make soft filters for smallest storf/gc len
+    storf_length = None  # True=favour the largest StORFs (more value) in groups
+    gc_length = None  # True=favour the StORFs with highest gc% (more value) in groups
 
 
 class WEIGHT_CONSTRAINTS(Enum):
@@ -30,79 +33,146 @@ def get_storf_delim(storf: list) -> list:
     return colon_delimiters, pipe_delimiters
 
 
+def get_ave_gc(average_type: int, storfs: list) -> float:
+    if average_type == 0: # mean
+        total_gc = 0
+        num_storfs = len(storfs)
+        for storf in storfs:
+            total_gc += len(re.findall('[GC]', storf[1]))
+        return float(total_gc/num_storfs)
+    elif average_type == 1: # median
+        # order StORFs by length
+        ord_storfs = sorted(storfs, key=lambda x: len(re.findall('[GC]', x[1])))
+        mid = (len(ord_storfs) - 1) // 2 
+        if len(ord_storfs) % 2:  # odd
+            mid_gc_value = len(re.findall('[GC]', ord_storfs[mid][1]))
+            return float(mid_gc_value)
+        else:  # even
+            # return interpolated median, average of both middle values
+            mid_1_gc = len(re.findall('[GC]', ord_storfs[mid][1]))
+            mid_2_gc = len(re.findall('[GC]', ord_storfs[mid + 1][1]))
+            mid_gc_value = (mid_1_gc + mid_2_gc) / 2
+            return mid_gc_value
+    else: # mode
+        # get gc count of each StORF
+        s_gc_len = [len(re.findall('[GC]', s[1])) for s in storfs]
+        # get the most occuring gc count
+        mode_largest = max(set(s_gc_len), key=s_gc_len.count)
+        # TODO currently only selects the largest mode if multiple exist
+        # add some functionality for determining which mode to take?
+        return float(mode_largest)
+
+
+
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
+    # TODO #this is not reproducing the same results as Nicks
     # Adjust objective variable coefficient to 0 iff StORF not within overlap constraint
     o_min = HARD_FILTER.overlap_range.value[0]
     o_max = HARD_FILTER.overlap_range.value[1]
     s_pair_combinations = [i for i in itertools.combinations(storf_group, 2)]  # combinations in order
     banned_storfs = []
     for i in s_pair_combinations:
-        x_storf_id = int(i[0][0])
-        y_storf_id = int(i[1][0])
-        if x_storf_id in banned_storfs or y_storf_id in banned_storfs:
-            banned_storfs.append(x_storf_id)
-            banned_storfs.append(y_storf_id)
-            continue
-        x = i[0][1][0]
+        x = i[0][1][0]  # StORF x meta info
         storf_x_locus = x[x.index(":")+1:x.index("|")] 
         stop_x = int(storf_x_locus[storf_x_locus.index("-") + 1:])
-        y = i[1][1][0]
+        y = i[1][1][0]  # StORF y meta info
         storf_y_locus = y[y.index(":")+1:y.index("|")] 
         start_y = int(storf_y_locus[:storf_x_locus.index("-")])
-        if stop_x - start_y > 0:
-            if stop_x - start_y < o_min or stop_x - start_y > o_max:
+
+        if not stop_x - start_y > 0:  # if no overlap
+            continue
+
+        x_storf_id = int(i[0][0])
+        y_storf_id = int(i[1][0])
+        
+        if x_storf_id in banned_storfs or y_storf_id in banned_storfs:
+            if y_storf_id not in banned_storfs:
                 banned_storfs.append(y_storf_id)
+            if x_storf_id not in banned_storfs:
                 banned_storfs.append(x_storf_id)
-    for b in banned_storfs:
-        storf_group_values[b] = (b, 0) 
+            continue
+
+        if stop_x - start_y <= o_min or stop_x - start_y >= o_max:
+            banned_storfs.append(y_storf_id)
+            banned_storfs.append(x_storf_id)
+
+    if len(banned_storfs) > 0:
+        ord_banned = sorted(banned_storfs)
+        offset = ord_banned[0]
+        for storf_id in banned_storfs:
+            # overwrite selection value for banned StORF(s)
+            storf_group_values[storf_id - offset][1] = 0
     return storf_group_values
 
 
 def filter_by_size_range(storf_group_values: list, storf_group: list) -> list:
+    for i, storf in enumerate(storf_group):
+        minl, maxl = HARD_FILTER.size_range.value[0], HARD_FILTER.size_range.value[1]
+        if not minl <= len(re.findall('[AGCT]', storf[1][1])) <= maxl:
+            storf_group_values[i][1] = 0
     return storf_group_values
 
 
-def filter_by_gc_range(storf_group_values: list, storf_group: list) -> list:
+def filter_by_gc_range(storf_group_values: list, storf_group: list, ave_gc: float) -> list:
+    mingc = ave_gc - (ave_gc * 0.05)
+    maxgc = ave_gc + (ave_gc * 0.05)
+    for i, storf in enumerate(storf_group):
+        if not mingc <= len(re.findall('[GC]', storf[1][1])) <= maxgc:
+            storf_group_values[i][1] = 0
     return storf_group_values
 
 
 def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
+    for i, storf in enumerate(storf_group):
+        # must be multiplication so that hard filters still affect coefficient values
+        storf_group_values[i][1] *= len(re.findall('[AGCT]', storf[1][1]))
     return storf_group_values
 
 
-def filter_favour_gc_percentage(storf_group_values: list, storf_group: list) -> list:
+def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
+
+    for i, storf in enumerate(storf_group):
+        storf_group_values[i][1] *= len(re.findall('[GC]', storf[1][1]))
     return storf_group_values
 
 
-def set_group_values(storf_group: list) -> list:
+def set_group_values(storf_group: list, ave_gc: None | int) -> list:
     # default value is of StORF is 1 
     # If restrictions clash then overwrite offending StORF value with 0
-    storf_group_values = [(s[0],1) for s in storf_group]
-
+    storf_group_values = [[s[0],1] for s in storf_group]  # storf id and value
     #print("before")
     #print(storf_group_values)
-    if len(storf_group_values) != 1:
-        if HARD_FILTER.overlap_range.value is not None:
-            storf_group_values = filter_by_overlap(storf_group_values, storf_group)
+    
+    # HARD FILTERS, final subset discretely defined using ranges
+    if HARD_FILTER.overlap_range.value is not None:
+        storf_group_values = filter_by_overlap(storf_group_values, storf_group)
 
-        #TODO# if HARD_FILTER.size_range.value is not None:
-            # storf_group_values = filter_by_size_range(storf_group_values, storf_group)
+    if HARD_FILTER.size_range.value is not None:
+        storf_group_values = filter_by_size_range(storf_group_values, storf_group)
 
-        #TODO# if HARD_FILTER.gc_range.value is not None:
-            # storf_group_values = filter_by_gc_range(storf_group_values, storf_group)
-        
-        #TODO# if SOFT_FILTER.storf_length.value is not None:
-            # storf_group_values = filter_favour_length(storf_group_values, storf_group)
+    if HARD_FILTER.gc_range.value is not None:
+        storf_group_values = filter_by_gc_range(storf_group_values, storf_group, ave_gc)
 
-        #TODO# if SOFT_FILTER.gc_length.value is not None:
-            # storf_group_values = filter_favour_gc_percentage(storf_group_values, storf_group)
+    # TODO HARD FILTER VIA STOP CODON SELECTION
+    
+    # SOFT FILTERS, final subset effected by less defined StORF characteristics
+    # e.g. FAVOUR larger sized StORFs(soft), only StORFs in range x-y (HARD)
+    if SOFT_FILTER.storf_length.value is not None:
+        storf_group_values = filter_favour_length(storf_group_values, storf_group)
+
+    if SOFT_FILTER.gc_length.value is not None:
+        storf_group_values = filter_favour_most_gc(storf_group_values, storf_group)
 
     #print("after")
     #print(storf_group_values)
+    #b = storf_group[0][1][0].find("4970-5284")
+    #if b != -1:
+    #    print(storf_group[0][1][0])
+    #    print(storf_group_values)
     return storf_group_values
 
 
-def is_new_group(storf: list, storf_id, total_num_storfs: int) -> bool:
+def is_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
     # Does the StORF belong to a new collection of overlapping StORFs
     colon_delims, pipe_delims = get_storf_delim(storf)
     # the location of the StORF relative to its overlapping region
@@ -116,13 +186,13 @@ def is_new_group(storf: list, storf_id, total_num_storfs: int) -> bool:
 
 def read_fasta() -> list:
     unfiltered_storfs = []
-    with open("../../testin/smallstorftest.fasta") as storf_file:
+    with open("../../testin/E-coli_output_no_filt.fasta") as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
     # TMP test files
-    # "../../testout/smallstorftest.fasta"
-    # "../../testout/E-coli_output_no_filt.fasta"
+    # "../../testin/smallstorftest.fasta"
+    # "../../testin/E-coli_output_no_filt.fasta"
     return unfiltered_storfs
 
 
@@ -134,8 +204,14 @@ def write_fasta(filtered_storfs: list) -> None:
 
 def ip_set_obj_func(prob: pulp.LpProblem, obj_variables: list, ip_vars: list) -> None:
     obj_expression = []
+    #for tmp in range(0,4):
+        #print(obj_variables[tmp])
+    
     for variable in obj_variables:
         obj_expression.append((ip_vars[variable[0]], variable[1]))
+
+    #for tmp in range(0,4):
+    #    print(obj_expression[tmp])
     e = pulp.LpAffineExpression(obj_expression)
     # add objective function (in turn, adds variable bounds)
     prob += e
@@ -188,11 +264,21 @@ def ip_filter(storfs: list) -> list:
     group = []  # overlapping group of StORFs
     same_group = True
     obj_variables = []
+
+
+    # pre-compute average gc content
+    if HARD_FILTER.gc_range.value is not None: 
+        typ = HARD_FILTER.gc_range.value[1]  # 0=mean, 1=median, 2=mode
+        ave_gc = get_ave_gc(typ, storfs)
+    else:
+        ave_gc = None
+    
+
     # determine coefficient values of future IP variables
     for storf in storfs:
-        # many StORF values are dependent on their group
+        # StORF values are dependent on their group
         if is_new_group(storf, s, s_total):
-            obj_variables += set_group_values(group)
+            obj_variables += set_group_values(group, ave_gc)
             # add weight constraint to each group
             ip_set_group_constraint(prob, ip_vars, group, g)
             group = [(s, storf)]  # init new group
@@ -201,7 +287,7 @@ def ip_filter(storfs: list) -> list:
             group.append((s, storf))
         s+=1
     # add values to last group of StORFs...  
-    obj_variables += set_group_values(group)
+    obj_variables += set_group_values(group, ave_gc)
     # set constraint for last group (auto-adds IP variable bounds)
     ip_set_group_constraint(prob, ip_vars, group, g)
 
@@ -213,14 +299,19 @@ def ip_filter(storfs: list) -> list:
 
     # get selected StORFs from IP solution
     prob.solve()
-    print(prob)
-    selected = []
-    for i, var in enumerate(prob.variables()):
-        print(f"{i}={pulp.value(var)}")
 
-        if pulp.value(var) == 1.0:
-            selected.append(storfs[i])
-    return selected
+    selected = {}
+    for var in prob.variables():
+        print(f"{var.name}={pulp.value(var)}")
+        selected[var.name] = pulp.value(var)
+
+    ordered_selected = collections.OrderedDict(sorted(selected.items(), key=lambda t: int(t[0][2:]) ))
+    final_filter = []
+    for i, v in enumerate(ordered_selected.values()):
+        if v == 1.0:
+            final_filter.append(storfs[i])
+        
+    return final_filter
 
 
 def main():
