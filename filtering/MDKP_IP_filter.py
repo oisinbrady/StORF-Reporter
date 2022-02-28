@@ -165,10 +165,6 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
 
     #print("after")
     #print(storf_group_values)
-    #b = storf_group[0][1][0].find("4970-5284")
-    #if b != -1:
-    #    print(storf_group[0][1][0])
-    #    print(storf_group_values)
     return storf_group_values
 
 
@@ -204,14 +200,8 @@ def write_fasta(filtered_storfs: list) -> None:
 
 def ip_set_obj_func(prob: pulp.LpProblem, obj_variables: list, ip_vars: list) -> None:
     obj_expression = []
-    #for tmp in range(0,4):
-        #print(obj_variables[tmp])
-    
     for variable in obj_variables:
         obj_expression.append((ip_vars[variable[0]], variable[1]))
-
-    #for tmp in range(0,4):
-    #    print(obj_expression[tmp])
     e = pulp.LpAffineExpression(obj_expression)
     # add objective function (in turn, adds variable bounds)
     prob += e
