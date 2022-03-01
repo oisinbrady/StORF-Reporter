@@ -24,7 +24,7 @@ class SOFT_FILTER(Enum):
 class WEIGHT_CONSTRAINTS(Enum):
     # knapsack constraints, default should be -1=infinity, i.e., AMAP
     sum_total = -1  # of all StORF group total weights
-    storf_group = -1
+    storf_group = 1
 
 
 def get_storf_delim(storf: list) -> list:
@@ -66,6 +66,16 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
 
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     # TODO #this is not reproducing the same results as Nicks
+    # TODO #
+    # order storf group by largest length first
+    # for each storf pair, (x,y), in group
+        # if overlap > allowed:
+            # remove both storfs (select value = 0)
+        # elif storf y completely inside storf x:
+            # remove storf y (select value = 0)
+
+
+
     # Adjust objective variable coefficient to 0 iff StORF not within overlap constraint
     o_min = HARD_FILTER.overlap_range.value[0]
     o_max = HARD_FILTER.overlap_range.value[1]
@@ -182,11 +192,12 @@ def is_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
 
 def read_fasta() -> list:
     unfiltered_storfs = []
-    with open("../../testin/E-coli_output_no_filt.fasta") as storf_file:
+    with open("../../testout/nick_output/E-Coli_storfs_no_filter.fasta") as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
     # TMP test files
+    # "../../testout/nick_output/E-Coli_storfs_no_filter"
     # "../../testin/smallstorftest.fasta"
     # "../../testin/E-coli_output_no_filt.fasta"
     return unfiltered_storfs
