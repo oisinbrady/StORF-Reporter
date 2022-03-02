@@ -68,108 +68,17 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
         return float(mode_largest)
 
 
-# TODO consider renaming in light of new function behaviour
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
-    # TODO #this is not reproducing the same results as Nicks
+    # get adjacency list of each StORF in group
 
-    # GOAL: of all StORFs in group return at least 1
-    # Where returned storf(s) is the most likely to be the 'best' 
-    # 'best' = soft filter value of StORF, i.e. longest and or most gc
+    # get sub-groups of allowed overlapping adjaceny lists
 
-    # There are 3 types of StORF pairs(x,y) to consider:
-        # Where there is no overlap at all -> DONT REMOVE x & y
-        # Where y is completely inside x -> REMOVE y
-        # Where there is a parital overlap -> REMOVE Y IF OUT OF ALLOWED RANGE
-            # i.e. allows both StORFs if overlap is small enough
+    # for each sub group 
+        # get adj list with highest value
 
-    #print(len(storf_group))
-    #print()
-    # Adjust objective variable coefficient to 0 iff StORF not within overlap constraint
-    o_min = HARD_FILTER.overlap_range.value[0]
-    o_max = HARD_FILTER.overlap_range.value[1]
-    # Sort StORFs by value (e.g. length or gc content)
-    sorted_group_values = sorted(storf_group_values, key=lambda x:x[1], reverse=True)
+    # for all storfs not in adj lists of highest value
+        # storf.value = 0
 
-    
-    TEST = False
-    TEST_STORF = False
-    #if storf[0].find("17338-17452") != -1:
-    #        print(storf[0])    
-    #        exit()
-    #print(storf_group[0][1][0])
-    if storf_group[0][1][0].find("16956-17539") != -1:
-        TEST = True
-        print(f"storf_group_values={storf_group_values}")
-        print(f"sorted_group_values={sorted_group_values}")
-
-    removed = []
-    #print(sorted_group_values)
-    group_size = len(sorted_group_values)
-    offset = int(storf_group_values[0][0])
-    # compare each StORF pair in the group
-    for i in range(0,group_size-1):
-        x_id = sorted_group_values[i][0] 
-        # StORF x meta info
-        x = storf_group[x_id-offset][1][0]
-        # get StORF x positional data 
-        storf_x_locus = x[x.index(":")+1:x.index("|")] 
-        start_x = int(storf_x_locus[:storf_x_locus.index("-")])
-        stop_x = int(storf_x_locus[storf_x_locus.index("-") + 1:])
-
-        for j in range(i+1, group_size):
-            y_id = sorted_group_values[j][0] 
-            # StORF y meta info
-            y = storf_group[y_id-offset][1][0]
-            # get StORF y positional data 
-            storf_y_locus = y[y.index(":")+1:y.index("|")] 
-            start_y = int(storf_y_locus[:storf_y_locus.index("-")])
-            stop_y = int(storf_y_locus[storf_y_locus.index("-") + 1:])
-            # Start filtering
-            #print(f"COMPARING STORF ID:{x_id}, {y_id}")
-            #if TEST:
-            #    # TODO# PROBLEM: x_
-                #print(f"x_id={x_id}, y_id={y_id}")
-            
-            if start_y > stop_x or stop_y < start_x:
-                # if no overlap; dont remove x and y
-                #if TEST:
-                 #   print(f"NO OVERLAP")
-                continue
-
-            if x_id in removed: 
-                # TODO not sure about this...
-                # no need to consider overlap if 1 is already not valid
-                break
-
-            if start_y > start_x and stop_y < stop_x:
-                # If StORF y iff fully embedded in StORF x
-                #if TEST:
-                #    if y_id == 27 or x_id == 29:
-                #        print(f"x_id={x_id}, y_id={y_id}")
-                #        print(f"{y_id} FULLY EMBEDDED in {x_id}: REMOVING {y_id}")
-                #removed.append(y_id)
-                sorted_group_values[j][1] = 0
-                #print(x_id, y_id)
-                #print(f"storf_group_values[{j}][1]({storf_group_values[j]})=0")
-                continue
-
-            # get first stop relative to begining of UR 
-            stop = min(stop_x, stop_y)  # get first stop b/w the pair
-            start = max(start_x, start_y)  # get second start 
-            if stop - start <= o_min or stop - start >= o_max:
-                # remove y iff overlap not within allowed range
-                if TEST:
-                    if y_id == 29:
-                        print(f"x_id={x_id}, y_id={y_id}")
-                        print(f"{stop_x} - {start_y} = {stop_x - start_y}")
-                        print(stop_x - start_y <= o_min)
-                        print(stop_x - start_y >= o_max)
-                        print(f"OVERLAP RULE VIOLATION: removing {y_id}")
-                sorted_group_values[j][1] = 0
-                #removed.append(y_id)
-    if TEST:
-        print(f"final sorted_group_values={sorted_group_values}")
-        exit()
     return sorted_group_values
 
 
