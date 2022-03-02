@@ -4,6 +4,11 @@ import re
 import itertools
 import collections
 
+# filters to match default behaviour of Nick's program is:
+# storf_length=True
+# overlap_range = [0, 50]
+# size_range = [100, 50000]
+
 class HARD_FILTER(Enum):
     overlap_range = [0, 50] # default [0, 50]  #67, 1000
     size_range = [100, 50000] # default [100, 50000]
@@ -17,14 +22,14 @@ class SOFT_FILTER(Enum):
     # (by increasing the value of the obj var coefficient)
 
     # TODO make soft filters for smallest storf/gc len
-    storf_length = None  # True=favour the largest StORFs (more value) in groups
+    storf_length = True  # True=favour the largest StORFs (more value) in groups
     gc_length = None  # True=favour the StORFs with highest gc% (more value) in groups
 
 
 class WEIGHT_CONSTRAINTS(Enum):
     # knapsack constraints, default should be -1=infinity, i.e., AMAP
     sum_total = -1  # of all StORF group total weights
-    storf_group = 1
+    storf_group = -1
 
 
 def get_storf_delim(storf: list) -> list:
@@ -63,56 +68,109 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
         return float(mode_largest)
 
 
-
+# TODO consider renaming in light of new function behaviour
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     # TODO #this is not reproducing the same results as Nicks
-    # TODO #
-    # order storf group by largest length first
-    # for each storf pair, (x,y), in group
-        # if overlap > allowed:
-            # remove both storfs (select value = 0)
-        # elif storf y completely inside storf x:
-            # remove storf y (select value = 0)
 
+    # GOAL: of all StORFs in group return at least 1
+    # Where returned storf(s) is the most likely to be the 'best' 
+    # 'best' = soft filter value of StORF, i.e. longest and or most gc
 
+    # There are 3 types of StORF pairs(x,y) to consider:
+        # Where there is no overlap at all -> DONT REMOVE x & y
+        # Where y is completely inside x -> REMOVE y
+        # Where there is a parital overlap -> REMOVE Y IF OUT OF ALLOWED RANGE
+            # i.e. allows both StORFs if overlap is small enough
 
+    #print(len(storf_group))
+    #print()
     # Adjust objective variable coefficient to 0 iff StORF not within overlap constraint
     o_min = HARD_FILTER.overlap_range.value[0]
     o_max = HARD_FILTER.overlap_range.value[1]
-    s_pair_combinations = [i for i in itertools.combinations(storf_group, 2)]  # combinations in order
-    banned_storfs = []
-    for i in s_pair_combinations:
-        x = i[0][1][0]  # StORF x meta info
+    # Sort StORFs by value (e.g. length or gc content)
+    sorted_group_values = sorted(storf_group_values, key=lambda x:x[1], reverse=True)
+
+    
+    TEST = False
+    TEST_STORF = False
+    #if storf[0].find("17338-17452") != -1:
+    #        print(storf[0])    
+    #        exit()
+    #print(storf_group[0][1][0])
+    if storf_group[0][1][0].find("16956-17539") != -1:
+        TEST = True
+        print(f"storf_group_values={storf_group_values}")
+        print(f"sorted_group_values={sorted_group_values}")
+
+    removed = []
+    #print(sorted_group_values)
+    group_size = len(sorted_group_values)
+    offset = int(storf_group_values[0][0])
+    # compare each StORF pair in the group
+    for i in range(0,group_size-1):
+        x_id = sorted_group_values[i][0] 
+        # StORF x meta info
+        x = storf_group[x_id-offset][1][0]
+        # get StORF x positional data 
         storf_x_locus = x[x.index(":")+1:x.index("|")] 
+        start_x = int(storf_x_locus[:storf_x_locus.index("-")])
         stop_x = int(storf_x_locus[storf_x_locus.index("-") + 1:])
-        y = i[1][1][0]  # StORF y meta info
-        storf_y_locus = y[y.index(":")+1:y.index("|")] 
-        start_y = int(storf_y_locus[:storf_x_locus.index("-")])
 
-        if not stop_x - start_y > 0:  # if no overlap
-            continue
+        for j in range(i+1, group_size):
+            y_id = sorted_group_values[j][0] 
+            # StORF y meta info
+            y = storf_group[y_id-offset][1][0]
+            # get StORF y positional data 
+            storf_y_locus = y[y.index(":")+1:y.index("|")] 
+            start_y = int(storf_y_locus[:storf_y_locus.index("-")])
+            stop_y = int(storf_y_locus[storf_y_locus.index("-") + 1:])
+            # Start filtering
+            #print(f"COMPARING STORF ID:{x_id}, {y_id}")
+            #if TEST:
+            #    # TODO# PROBLEM: x_
+                #print(f"x_id={x_id}, y_id={y_id}")
+            
+            if start_y > stop_x or stop_y < start_x:
+                # if no overlap; dont remove x and y
+                #if TEST:
+                 #   print(f"NO OVERLAP")
+                continue
 
-        x_storf_id = int(i[0][0])
-        y_storf_id = int(i[1][0])
-        
-        if x_storf_id in banned_storfs or y_storf_id in banned_storfs:
-            if y_storf_id not in banned_storfs:
-                banned_storfs.append(y_storf_id)
-            if x_storf_id not in banned_storfs:
-                banned_storfs.append(x_storf_id)
-            continue
+            if x_id in removed: 
+                # TODO not sure about this...
+                # no need to consider overlap if 1 is already not valid
+                break
 
-        if stop_x - start_y <= o_min or stop_x - start_y >= o_max:
-            banned_storfs.append(y_storf_id)
-            banned_storfs.append(x_storf_id)
+            if start_y > start_x and stop_y < stop_x:
+                # If StORF y iff fully embedded in StORF x
+                #if TEST:
+                #    if y_id == 27 or x_id == 29:
+                #        print(f"x_id={x_id}, y_id={y_id}")
+                #        print(f"{y_id} FULLY EMBEDDED in {x_id}: REMOVING {y_id}")
+                #removed.append(y_id)
+                sorted_group_values[j][1] = 0
+                #print(x_id, y_id)
+                #print(f"storf_group_values[{j}][1]({storf_group_values[j]})=0")
+                continue
 
-    if len(banned_storfs) > 0:
-        ord_banned = sorted(banned_storfs)
-        offset = ord_banned[0]
-        for storf_id in banned_storfs:
-            # overwrite selection value for banned StORF(s)
-            storf_group_values[storf_id - offset][1] = 0
-    return storf_group_values
+            # get first stop relative to begining of UR 
+            stop = min(stop_x, stop_y)  # get first stop b/w the pair
+            start = max(start_x, start_y)  # get second start 
+            if stop - start <= o_min or stop - start >= o_max:
+                # remove y iff overlap not within allowed range
+                if TEST:
+                    if y_id == 29:
+                        print(f"x_id={x_id}, y_id={y_id}")
+                        print(f"{stop_x} - {start_y} = {stop_x - start_y}")
+                        print(stop_x - start_y <= o_min)
+                        print(stop_x - start_y >= o_max)
+                        print(f"OVERLAP RULE VIOLATION: removing {y_id}")
+                sorted_group_values[j][1] = 0
+                #removed.append(y_id)
+    if TEST:
+        print(f"final sorted_group_values={sorted_group_values}")
+        exit()
+    return sorted_group_values
 
 
 def filter_by_size_range(storf_group_values: list, storf_group: list) -> list:
@@ -153,6 +211,16 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
     #print("before")
     #print(storf_group_values)
     
+    # SOFT FILTERS, final subset effected by less defined StORF characteristics
+    # e.g. FAVOUR larger sized StORFs(soft), only StORFs in range x-y (HARD)
+    if SOFT_FILTER.storf_length.value is not None:
+        storf_group_values = filter_favour_length(storf_group_values, storf_group)
+
+    if SOFT_FILTER.gc_length.value is not None:
+        storf_group_values = filter_favour_most_gc(storf_group_values, storf_group)
+
+
+
     # HARD FILTERS, final subset discretely defined using ranges
     if HARD_FILTER.overlap_range.value is not None:
         storf_group_values = filter_by_overlap(storf_group_values, storf_group)
@@ -165,20 +233,15 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
 
     # TODO HARD FILTER VIA STOP CODON SELECTION
     
-    # SOFT FILTERS, final subset effected by less defined StORF characteristics
-    # e.g. FAVOUR larger sized StORFs(soft), only StORFs in range x-y (HARD)
-    if SOFT_FILTER.storf_length.value is not None:
-        storf_group_values = filter_favour_length(storf_group_values, storf_group)
-
-    if SOFT_FILTER.gc_length.value is not None:
-        storf_group_values = filter_favour_most_gc(storf_group_values, storf_group)
 
     #print("after")
     #print(storf_group_values)
     return storf_group_values
 
 
-def is_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
+def is_next_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
+    # determine if the StORF after this current StORF is a member of a new group
+
     # Does the StORF belong to a new collection of overlapping StORFs
     colon_delims, pipe_delims = get_storf_delim(storf)
     # the location of the StORF relative to its overlapping region
@@ -192,7 +255,7 @@ def is_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
 
 def read_fasta() -> list:
     unfiltered_storfs = []
-    with open("../../testout/nick_output/E-Coli_storfs_no_filter.fasta") as storf_file:
+    with open("../../testin/E-coli_output_no_filt.fasta") as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
@@ -278,8 +341,15 @@ def ip_filter(storfs: list) -> list:
     # determine coefficient values of future IP variables
     for storf in storfs:
         # StORF values are dependent on their group
-        if is_new_group(storf, s, s_total):
-            obj_variables += set_group_values(group, ave_gc)
+
+        
+
+        if is_next_new_group(storf, s, s_total):
+            #group.append((s, storf))  # add last StORF in group
+            #print(f"storf_id={s}")
+            # create list of to be objective variables with coefficients for each StORF
+            obj_variables += set_group_values(group, ave_gc)  
+            #print(f"group(len)={len(group)}")
             # add weight constraint to each group
             ip_set_group_constraint(prob, ip_vars, group, g)
             group = [(s, storf)]  # init new group
