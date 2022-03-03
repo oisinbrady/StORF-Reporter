@@ -68,18 +68,43 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
         return float(mode_largest)
 
 
+def get_overlap_contigs(allowed_overlaps_adj: list, contig_groups: list) -> list:
+    return 
+
+
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
-    # get adjacency list of each StORF in group
 
-    # get sub-groups of allowed overlapping adjaceny lists
+    TEST = False
+    if storf_group[0][1][0].find("11736-12213") != -1:
+        print(storf_group_values)
+        TEST = True
 
-    # for each sub group 
-        # get adj list with highest value
+    o_min, o_max = HARD_FILTER.overlap_range.value[0], HARD_FILTER.overlap_range.value[1]
+    allowed_overlaps = [[] for i in range(0, len(storf_group))] # adj list 
+    # get adjacency list of all allowed overlaps for each StORF
+    # I.e., StORFs that are within overlap restrictions form contig regions
+    for i in range(0, len(storf_group)):
+        storf_x_meta = storf_group[i][1][0]
+        x_locus = storf_x_meta[storf_x_meta.find(":")+1:storf_x_meta.find("|")]
+        x_stop = x_locus[x_locus.find("-")+1:]
+        for j in range(i+1, len(storf_group)):
+            storf_y_meta = storf_group[j][1][0]
+            y_locus = storf_y_meta[storf_y_meta.find(":")+1:storf_y_meta.find("|")]
+            y_start = y_locus[:y_locus.find("-")]
+            # if StORF overlaps & doesn't violate overlap bound:
+            overlap = int(x_stop) - int(y_start)
+            if overlap > 0:
+                if o_min <= overlap <= o_max:
+                    # add to adj list
+                    allowed_overlaps[i].append(j)
+    # TODO # determine contigs from overlapping lists
+    # TODO # get max(contig) for each contig
+    # TODO # whatever StORFs are not max, value = 0
+    if TEST:
+        print(allowed_overlaps)
+        exit()
 
-    # for all storfs not in adj lists of highest value
-        # storf.value = 0
-
-    return sorted_group_values
+    return storf_group_values
 
 
 def filter_by_size_range(storf_group_values: list, storf_group: list) -> list:
