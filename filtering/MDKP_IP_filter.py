@@ -153,6 +153,16 @@ def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
     return storf_group_values
 
 
+def storf_get_value(storf: list) -> int:
+    value = 0
+    if SOFT_FILTER.storf_length.value is not None:
+        value += len(re.findall('[AGCT]', storf[1]))
+
+    if SOFT_FILTER.gc_length.value is not None:
+        value += len(re.findall('[GC]', storf[1]))
+    return value
+
+
 def set_group_values(storf_group: list, ave_gc: None | int) -> list:
     # default value is of StORF is 1 
     # If restrictions clash then overwrite offending StORF value with 0
@@ -170,15 +180,16 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
 
 
 
+    # TODO convert to constraints
     # HARD FILTERS, final subset discretely defined using ranges
-    if HARD_FILTER.overlap_range.value is not None:
-        storf_group_values = filter_by_overlap(storf_group_values, storf_group)
+    #if HARD_FILTER.overlap_range.value is not None:
+    #    storf_group_values = filter_by_overlap(storf_group_values, storf_group)
 
-    if HARD_FILTER.size_range.value is not None:
-        storf_group_values = filter_by_size_range(storf_group_values, storf_group)
+    #if HARD_FILTER.size_range.value is not None:
+    #    storf_group_values = filter_by_size_range(storf_group_values, storf_group)
 
-    if HARD_FILTER.gc_range.value is not None:
-        storf_group_values = filter_by_gc_range(storf_group_values, storf_group, ave_gc)
+    #if HARD_FILTER.gc_range.value is not None:
+    #    storf_group_values = filter_by_gc_range(storf_group_values, storf_group, ave_gc)
 
     # TODO HARD FILTER VIA STOP CODON SELECTION
     
@@ -186,6 +197,61 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
     #print("after")
     #print(storf_group_values)
     return storf_group_values
+
+
+def ip_set_constraints(prob: pulp.LpProblem, storfs: list, total_storfs: int, ip_vars: list) -> list:
+    group = []
+    g = 0
+    s = 0
+    group_tracker = [[]]
+    # get StORF "overlap" groups
+    for storf in storfs:
+        if is_next_new_group(storf, s, total_storfs):
+            # ip_set_group_constraint(prob, ip_vars, group, g)
+            ip_set_overlap_constraint(prob, group, total_storfs, ip_vars)
+
+            group_tracker.append([s])
+            group = [(s, storf)]  # init new group
+            g += 1
+        else:
+            group_tracker[g].append(s)
+            group.append((s, storf))
+
+        s+=1
+    return group_tracker
+    # ip_set_group_constraint(prob, ip_vars, group, g)
+
+
+def ip_set_overlap_constraint(prob: pulp.LpProblem, group: list, total_storfs: int, ip_vars: list):
+    max_overlap = HARD_FILTER.overlap_range.value[1]
+    # get each pair combination from StORF group
+    pairs = [i for i in itertools.combinations(group, 2)]  # combinations in order
+    if max_overlap == -1 and len(group) > 1:
+        # iff no max overlap set, no need for constraint
+        return
+    elif len(group) > 1:
+        for i, pair in enumerate(pairs):
+            # get x stop location
+            storf_x_meta = pair[0][1][0]
+            storf_x_id = pair[0][0]
+            x_locus = storf_x_meta[storf_x_meta.find(":")+1:storf_x_meta.find("|")]
+            stop_x = int(x_locus[x_locus.find("-")+1:])
+            # get y start location
+            storf_y_meta = pair[1][1][0]
+            storf_y_id = pair[1][0]
+            y_locus = storf_y_meta[storf_y_meta.find(":")+1:storf_y_meta.find("|")]
+            start_y = int(y_locus[:y_locus.find("-")])
+
+            # TODO # this is not correct
+            # 16956-17539 compare results for this StORF group
+            # not the same! the constraint must be wrong
+
+            # in the case that no storfs in group are selected:
+            # need to select StORF of highest value in group
+            # this is done at end of ip_filter (where it looks at max of all stORF values in group)
+
+            prob += ip_vars[storf_x_id]*stop_x - ip_vars[storf_y_id]*start_y <= max_overlap
+            # prob += ip_vars[storf_x_id]*stop_x - ip_vars[storf_y_id]*start_y >= 0
 
 
 def is_next_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
@@ -229,10 +295,10 @@ def write_fasta(filtered_storfs: list) -> None:
         f.write(f"{storf[0]}{storf[1]}")
 
 
-def ip_set_obj_func(prob: pulp.LpProblem, obj_variables: list, ip_vars: list) -> None:
+def ip_set_obj_func(prob: pulp.LpProblem, obj_values: list, ip_vars: list) -> None:
     obj_expression = []
-    for variable in obj_variables:
-        obj_expression.append((ip_vars[variable[0]], variable[1]))
+    for storf, value in enumerate(obj_values):
+        obj_expression.append((ip_vars[storf], value))
     e = pulp.LpAffineExpression(obj_expression)
     # add objective function (in turn, adds variable bounds)
     prob += e
@@ -272,15 +338,14 @@ def ip_filter(storfs: list) -> list:
     # N.B.: Weight of each StORF = 1,
     # C_t = cap of all StORFs e.g., how many StORFs can be selected total,
     # C_k = cap selection for each StORF group (sub-knapsack). 
-
+    s_total = len(storfs)
     # initialise IP instance
     prob = pulp.LpProblem("StORF_IP_Filter", pulp.LpMaximize)
-    s_total = len(storfs)
-    g = 0  # group id
-    s = 0  # storf id
-    # Create IP variables
-    storf_ids = [f"x_{s}" for s in range(0, s_total)]
-    ip_vars = [pulp.LpVariable(storf_ids[i], lowBound=0, upBound=1, cat='Integer') for i in range(0, s_total)]
+    # Create IP StORF variables
+    storf_ids = [s for s in range(0, s_total)]
+    ip_vars = [pulp.LpVariable(f"x_{i}", lowBound=0, upBound=1) for i in range(0, s_total)]
+    # create IP y variables (for conditional constraints determined by x variables)
+    # ip_vars += [pulp.LpVariable(f"y{i}_", lowBound=0, upBound=1, cat='Integer') for i in range(0, s_total)]
     group = []  # overlapping group of StORFs
     same_group = True
     obj_variables = []
@@ -292,48 +357,59 @@ def ip_filter(storfs: list) -> list:
         ave_gc = get_ave_gc(typ, storfs)
     else:
         ave_gc = None
-    
 
-    # determine coefficient values of future IP variables
+
+    # determine coefficient values of IP variables (StORFs)
+    values = []
     for storf in storfs:
-        # StORF values are dependent on their group
-       
-        if is_next_new_group(storf, s, s_total):
-            # create list of to be objective variables with coefficients for each StORF
-            obj_variables += set_group_values(group, ave_gc)  
-            # add weight constraint to each group
-            ip_set_group_constraint(prob, ip_vars, group, g)
-            group = [(s, storf)]  # init new group
-            g += 1
-        else:
-            group.append((s, storf))
-        s+=1
-    # add values to last group of StORFs...  
-    obj_variables += set_group_values(group, ave_gc)
-    # set constraint for last group (auto-adds IP variable bounds)
-    ip_set_group_constraint(prob, ip_vars, group, g)
+        values.append(storf_get_value(storf))
+    # values += [1 for i in range(0, len(storfs))]  # for y (constraint conditional) variables
+    original_values = values
 
-    # construct objective function (auto-adds IP variable bounds)
-    ip_set_obj_func(prob, obj_variables, ip_vars)
+    # initialise objective function
+    ip_set_obj_func(prob, values, ip_vars)
+    # total_value = sum(x * storf for x,storf in zip(ip_vars, values))
     
+    # initialise constraints
+    group_tracker = ip_set_constraints(prob, storfs, s_total, ip_vars)
+
     # Add knapsack sum constraint
     ip_set_total_constraint(prob, ip_vars)
 
-    # get selected StORFs from IP solution
+
     prob.solve()
 
-    selected = {}
-    for var in prob.variables():
-        #print(f"{var.name}={pulp.value(var)}")
-        selected[var.name] = pulp.value(var)
 
-    ordered_selected = collections.OrderedDict(sorted(selected.items(), key=lambda t: int(t[0][2:]) ))
-    final_filter = []
-    for i, v in enumerate(ordered_selected.values()):
-        if v == 1.0:
-            final_filter.append(storfs[i])
-        
-    return final_filter
+    
+
+    solved_variables = sorted(prob.variables(), key=lambda x:int(x.name[2:]))
+    filtered_storfs = []
+    #21
+    s = 0
+    for g, group in enumerate(group_tracker):
+        selected = False
+        for storf in group:
+            
+            if s == 24:
+                print(group)
+                for x in group:
+                    print(solved_variables[x].name)
+                    print(storfs[int(solved_variables[x].name[2:])])
+                    print(solved_variables[x].value())
+                
+            s += 1
+            if solved_variables[storf].value() == 1.0:
+                filtered_storfs.append(storfs[storf])
+                selected = True
+        if selected == False:
+            # if no permitted overlaps in a group
+            group_start = group_tracker[g][0]
+            group_end = group_tracker[g][len(group)-1]
+            # get highest value in group
+            highest_index = original_values.index(max(original_values[group_start:group_end+1]))
+            filtered_storfs.append(storfs[highest_index])
+
+    return filtered_storfs
 
 
 def main():
