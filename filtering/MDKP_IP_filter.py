@@ -70,74 +70,47 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
 
 
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
+    # modified version of Nick's tile_filtering function
     o_min, o_max = HARD_FILTER.overlap_range.value[0], HARD_FILTER.overlap_range.value[1]
-
-
-    
-
     ################ - Order greatest value first filtering
     ordered_by_value = []
-
     sorted_values = sorted(storf_group_values, key=lambda storf: storf[1], reverse=True)
     offset = storf_group_values[0][0]
     for s in sorted_values:
         ordered_by_value.append(storf_group[s[0]-offset])
-    
     ############## - For each StORF, remove all smaller overlapping STORFs according to filtering rules
     length = len(ordered_by_value)
-
-    if storf_group[0][1][0].find("193922-194051") != -1:
-        print("\n\n\n")
-        print(len(storf_group))
-        print("VALUES BEFORE:")
-        print(sorted_values)
-
-
-    removed = 0
     i = 0
     while i < length:
         x_index = ordered_by_value[i][0] - offset
         storf_x_meta = storf_group[x_index][1][0]
         storf_x_id = storf_group[i][0]
-        #print(storf_x_id)
         x_locus = storf_x_meta[storf_x_meta.find(":")+1:storf_x_meta.find("|")]
         start_x = int(x_locus[:x_locus.find("-")])
         stop_x = int(x_locus[x_locus.find("-")+1:])
         j = i+1
         while j < length:
-            print(f"COMPARING {i},{j}")
             y_index = ordered_by_value[j][0] - offset
             storf_y_meta = storf_group[y_index][1][0]
             y_locus = storf_y_meta[storf_y_meta.find(":")+1:storf_y_meta.find("|")]
             start_y = int(y_locus[:y_locus.find("-")])
             stop_y = int(y_locus[y_locus.find("-")+1:])
-            #print(f"{start_x} - {stop_x}, {start_y} - {stop_y}")
             if start_y >= stop_x or stop_y <= start_x:
-                print("1")
                 j+=1
                 continue  # Not caught up yet / too far
             elif start_y >= start_x and stop_y <= stop_x:
-                print("2")
                 ordered_by_value.pop(j)
-                removed += 1
                 length = len(ordered_by_value)
             else: # +1 needed for stop codon
-
                 x = set(range(start_x,stop_x+1))
                 y = set(range(start_y,stop_y+1))
                 overlap = len(x.intersection(y))
                 if overlap >= o_max:
-                    print("3")
                     ordered_by_value.pop(j)
-                    removed += 1
                     length = len(ordered_by_value)
                 else:
-                    print("4")
                     j += 1
-            #print("len=", length)
-            print([i[0] for i in ordered_by_value])
         length = len(ordered_by_value)
-
         i+=1
 
     selected = [i[0] for i in ordered_by_value]
@@ -145,21 +118,7 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     for storf in storf_group_values:
         if storf[0] not in selected:
             storf[1] = 0
-    
-    if storf_group[0][1][0].find("193922-194051") != -1:
-        # TODO # for this group, "193922-194051" & "194010-194223"
-        # overlap is 194051-194010=41, therefore it is kept in the output
-        # in Nick's program, this is not the case...
-        # why?
-
-
-        print(removed)
-        print(selected)
-        print("VALUES AFTER")
-        print(storf_group_values)
-        exit()
         
-
     return storf_group_values
 
 
@@ -310,7 +269,6 @@ def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
 
 
 def ip_filter(storfs: list) -> list:
-
     # N.B.: Weight of each StORF = 1,
     # C_t = cap of all StORFs e.g., how many StORFs can be selected total,
     # C_k = cap selection for each StORF group (sub-knapsack). 
@@ -341,13 +299,8 @@ def ip_filter(storfs: list) -> list:
         # StORF values are dependent on their group
        
         if is_next_new_group(storf, s, s_total):
-            #group.append((s, storf))  # add last StORF in group
-            #print(f"storf_id={s}")
             # create list of to be objective variables with coefficients for each StORF
-            
             obj_variables += set_group_values(group, ave_gc)  
-            
-            #print(f"group(len)={len(group)}")
             # add weight constraint to each group
             ip_set_group_constraint(prob, ip_vars, group, g)
             group = [(s, storf)]  # init new group
@@ -371,7 +324,7 @@ def ip_filter(storfs: list) -> list:
 
     selected = {}
     for var in prob.variables():
-        print(f"{var.name}={pulp.value(var)}")
+        #print(f"{var.name}={pulp.value(var)}")
         selected[var.name] = pulp.value(var)
 
     ordered_selected = collections.OrderedDict(sorted(selected.items(), key=lambda t: int(t[0][2:]) ))
