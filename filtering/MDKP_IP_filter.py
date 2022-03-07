@@ -235,23 +235,38 @@ def ip_set_overlap_constraint(prob: pulp.LpProblem, group: list, total_storfs: i
             storf_x_meta = pair[0][1][0]
             storf_x_id = pair[0][0]
             x_locus = storf_x_meta[storf_x_meta.find(":")+1:storf_x_meta.find("|")]
+            start_x = int(x_locus[:x_locus.find("-")])
             stop_x = int(x_locus[x_locus.find("-")+1:])
             # get y start location
             storf_y_meta = pair[1][1][0]
             storf_y_id = pair[1][0]
             y_locus = storf_y_meta[storf_y_meta.find(":")+1:storf_y_meta.find("|")]
             start_y = int(y_locus[:y_locus.find("-")])
+            stop_y = int(y_locus[y_locus.find("-")+1:])
+            if stop_x < start_y:
+                return
+            elif stop_y < stop_x:
+                prob += ip_vars[storf_y_id] == 0
+            else:
+                prob += (ip_vars[storf_y_id] * stop_x) - ip_vars[storf_y_id] <= max_overlap
+                # incase 0 * 0
+                prob += (ip_vars[storf_y_id] * stop_x) - ip_vars[storf_y_id] >= 1
 
-            # TODO # this is not correct
-            # 16956-17539 compare results for this StORF group
-            # not the same! the constraint must be wrong
+            # IDEAS
 
-            # in the case that no storfs in group are selected:
-            # need to select StORF of highest value in group
-            # this is done at end of ip_filter (where it looks at max of all stORF values in group)
+            # https://stackoverflow.com/questions/47406225/linearprogramming-non-overlapping-constraint
+            # google: "linear program constrain if overlap" https://www.google.com/search?client=firefox-b-lm&q=linear+program+constrain+if+overlap+
+            # Pulp has elastic constraints, penalties for values when out of constraint range
+            # https://stackoverflow.com/questions/66216156/linear-programming-constraint-set-up-related-to-placement
+            # http://yetanothermathprogrammingconsultant.blogspot.com/2017/07/rectangles-no-overlap-constraints.html
+            
+            # non-embedded constraint
+            # prob += ip_vars[storf_y_id] + stop_y >= ip_vars[storf_x_id] + stop_x
 
-            prob += ip_vars[storf_x_id]*stop_x - ip_vars[storf_y_id]*start_y <= max_overlap
-            # prob += ip_vars[storf_x_id]*stop_x - ip_vars[storf_y_id]*start_y >= 0
+            # overlap constraint
+            #prob += (ip_vars[storf_x_id] + stop_x) - (ip_vars[storf_y_id] * start_y) <= max_overlap
+            
+
 
 
 def is_next_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool:
@@ -378,7 +393,7 @@ def ip_filter(storfs: list) -> list:
 
 
     prob.solve()
-
+    print(prob)
 
     
 
