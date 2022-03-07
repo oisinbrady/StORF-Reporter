@@ -149,7 +149,7 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
                 x = set(range(start_x, stop_x + 1))
                 y = set(range(start_y, stop_y + 1))
                 overlap = len(x.intersection(y))
-                if overlap >= o_max:
+                if o_min <= overlap >= o_max:
                     ordered_by_value.pop(j)
                     length = len(ordered_by_value)
                 else:
