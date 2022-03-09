@@ -8,6 +8,7 @@ import collections
         - storf_length=True
         - overlap_range=[0, 50]
         - size_range=[100, 50000] 
+        - stop_codons=["TAG","TGA","TAA"]
 """
 
 
@@ -15,9 +16,10 @@ class HardFilter(Enum):
     """
     Filters that bound the sub-set of final selected StORFs
     """
-    overlap_range = [0, 50]  # default [0, 50]  #67, 1000
-    size_range = [100, 50000]  # default [100, 50000]
+    overlap_range = [0, 50]  # nt
+    size_range = [100, 50000]  # nt
     gc_range = None  # [1000, 0]  # 10=percentage variance, 0=mean, 1=median, 2=mode
+    stop_codons = ["TAG","TGA","TAA"]
 
 
 class SoftFilter(Enum):
@@ -87,8 +89,6 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
         s_gc_len = [len(re.findall('[GC]', s[1])) for s in storfs]
         # get the most occurring gc count
         mode_largest = max(set(s_gc_len), key=s_gc_len.count)
-        # TODO currently only selects the largest mode if multiple exist
-        # add some functionality for determining which mode to take?
         return float(mode_largest)
 
 
@@ -131,35 +131,36 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
         ordered_by_value.append(storf_group[s[0] - offset])
     # For each StORF, remove all smaller overlapping STORFs according to filtering rules
     length = len(ordered_by_value)
-    i = 0
+    i = 0  # first StORF of comparison pair
     while i < length:
         x_index = ordered_by_value[i][0] - offset
         start_x, stop_x = get_storf_loc(storf_group[x_index])
-        j = i + 1
+        j = i + 1  # second StORF of comparison pair
         while j < length:
             y_index = ordered_by_value[j][0] - offset
             start_y, stop_y = get_storf_loc(storf_group[y_index])
             if start_y >= stop_x or stop_y <= start_x:
+                # iff no overlap b/w pair
                 j += 1
-                continue  # Not caught up yet / too far
+                continue 
             elif start_y >= start_x and stop_y <= stop_x:
+                # iif StORF j fully embedded in i
                 ordered_by_value.pop(j)
                 length = len(ordered_by_value)
             else:  # +1 needed for stop codon
-                x = set(range(start_x, stop_x + 1))
-                y = set(range(start_y, stop_y + 1))
-                overlap = len(x.intersection(y))
-                if o_min <= overlap >= o_max:
+                overlap = stop_x - start_y + 1 if start_x <= start_y else stop_y - start_x + 1
+                if not o_min < overlap < o_max:
+                    # if j overlap is out of allowed bound
                     ordered_by_value.pop(j)
                     length = len(ordered_by_value)
-                else:
+                else:  # StORF j remains selected
                     j += 1
         length = len(ordered_by_value)
         i += 1
     selected = [i[0] for i in ordered_by_value]
     for storf in storf_group_values:
         if storf[0] not in selected:
-            storf[1] = 0
+            storf[1] = 0  # change co-efficient value to filter out disallowed StORFs
     return storf_group_values
 
 
@@ -195,6 +196,25 @@ def filter_by_gc_range(storf_group_values: list, storf_group: list, ave_gc: floa
     return storf_group_values
 
 
+def filter_by_stop_codons(storf_group_values: list, storf_group: list) -> list:
+    """
+    Assign a coefficient value of 0 to all StORFs in group that don't satisfy the stop codon 
+    constraint.
+    I.e., filter out StORFs that don't start and end with one of the allowed stop codons
+    :param storf_group_values: (list) Current coefficient values of StORFs in group
+    :param storf_group: (list) A contiguous region of StORFs containing some overlaps
+    :return: (list) An adjusted list of StORF values according to stop codons
+    """
+    allowed_codons = HardFilter.stop_codons.value
+    for i, storf in enumerate(storf_group):
+        l = len(storf[1][1])
+        start_codon = storf[1][1][0:3]
+        stop_codon = storf[1][1][l-4:l-1]
+        if start_codon not in allowed_codons or stop_codon not in allowed_codons:
+            storf_group_values[i][1] *= 0
+    return storf_group_values
+
+
 def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
     """
     Adjust the coefficient value of all StORFs in group according to their length.
@@ -203,7 +223,6 @@ def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
     :return: (list) An adjusted list of StORF values according to their length
     """
     for i, storf in enumerate(storf_group):
-        # must be multiplication so that hard filters still affect coefficient values
         storf_group_values[i][1] *= len(re.findall('[AGCT]', storf[1][1]))
     return storf_group_values
 
@@ -229,22 +248,20 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
     """
     storf_group_values = [[s[0], 1] for s in storf_group]  # storf id and value
     # Default value of StORF is 1, if StORF doesn't obey restrictions then overwrite to 0
-    """
-    SOFT FILTERS, final subset effected by less defined StORF characteristics
-    # e.g. FAVOUR larger sized StORFs(soft), only StORFs in range x-y (HARD)
-    """
+    # SOFT FILTERS: coefficient values equivalent to attributes of StORF, e.g. length
     if SoftFilter.storf_length.value is not None:
         storf_group_values = filter_favour_length(storf_group_values, storf_group)
     if SoftFilter.gc_length.value is not None:
         storf_group_values = filter_favour_most_gc(storf_group_values, storf_group)
-    # HARD FILTERS, final subset discretely defined using ranges
+    # HARD FILTERS: coefficient value altered to 0/1 depending on constraint
     if HardFilter.overlap_range.value is not None:
         storf_group_values = filter_by_overlap(storf_group_values, storf_group)
     if HardFilter.size_range.value is not None:
         storf_group_values = filter_by_size_range(storf_group_values, storf_group)
     if HardFilter.gc_range.value is not None:
         storf_group_values = filter_by_gc_range(storf_group_values, storf_group, ave_gc)
-    # TODO HardFilter by stop codon type
+    if HardFilter.stop_codons.value is not None:
+        storf_group_values = filter_by_stop_codons(storf_group_values, storf_group)
     return storf_group_values
 
 
