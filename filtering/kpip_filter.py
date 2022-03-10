@@ -394,8 +394,6 @@ def ip_filter(storfs: list) -> list:
     # initialise IP instance
     prob = pulp.LpProblem("StORF_IP_Filter", pulp.LpMaximize)
     s_total = len(storfs)
-    g = 0  # group id
-    s = 0  # storf id
     # Create IP variables
     storf_ids = [f"x_{s}" for s in range(0, s_total)]
     ip_vars = [pulp.LpVariable(storf_ids[i], lowBound=0, upBound=1, cat='Integer') for i in range(0, s_total)]
@@ -407,37 +405,38 @@ def ip_filter(storfs: list) -> list:
         ave_gc = get_ave_gc(typ, storfs)
     else:
         ave_gc = None
+    groud_id = 0
     # determine coefficient values of future IP variables
-    for storf in storfs:
+    for s, storf in enumerate(storfs):
         # StORF values are dependent on their group
         if is_next_new_group(storf, s, s_total):
             # create list of to be objective variables with coefficients for each StORF
             obj_values += set_group_values(group, ave_gc)
-            # add weight constraint to each group
-            ip_set_group_constraint(prob, ip_vars, group, g)
+            # add weight capacity constraint to each group
+            ip_set_group_constraint(prob, ip_vars, group, groud_id)
             group = [(s, storf)]  # init new group
-            g += 1
+            groud_id += 1
         else:
             group.append((s, storf))
-        s += 1
     # add values to last group of StORFs...  
     obj_values += set_group_values(group, ave_gc)
-    # set constraint for last group (auto-adds IP variable bounds)
-    ip_set_group_constraint(prob, ip_vars, group, g)
+    # set weight capacity constraint for last group (auto-adds IP variable bounds)
+    ip_set_group_constraint(prob, ip_vars, group, groud_id)
     # construct objective function (auto-adds IP variable bounds)
     ip_set_obj_func(prob, obj_values, ip_vars)
-    # Add knapsack sum constraint
+    # add knapsack sum capacity constraint
     ip_set_total_constraint(prob, ip_vars)
-    # get selected StORFs from IP solution
+    # solve the knapsack problem
     prob.solve()
+    # get selected StORFs from IP solution
     selected = {}
     for var in prob.variables():
-        # print(f"{var.name}={pulp.value(var)}")
+        #print(f"{var.name}={pulp.value(var)}")
         selected[var.name] = pulp.value(var)
     ordered_selected = collections.OrderedDict(sorted(selected.items(), key=lambda t: int(t[0][2:])))
     final_filter = []
     for i, v in enumerate(ordered_selected.values()):
-        if v == 1.0:
+        if v >= 1.0:
             final_filter.append(storfs[i])
     return final_filter
 
