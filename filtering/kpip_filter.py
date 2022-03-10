@@ -1,4 +1,5 @@
 from enum import Enum
+from itertools import product
 
 import pulp
 import re
@@ -20,6 +21,7 @@ class HardFilter(Enum):
     size_range = [100, 50000]  # nt
     gc_range = None  # [1000, 0]  # 10=percentage variance, 0=mean, 1=median, 2=mode
     stop_codons = ["TAG","TGA","TAA"]
+    mode_stop_codons = False
 
 
 class SoftFilter(Enum):
@@ -58,13 +60,14 @@ def get_storf_delim(storf: list) -> tuple[list[int], list[int]]:
     return colon_delimiters, pipe_delimiters
 
 
-def get_ave_gc(average_type: int, storfs: list) -> float:
+def get_ave_gc(storfs: list) -> float:
     """
     The average percentage of G and C bases of all StORFs in unannotated genome
     :param average_type: (int) 0=mean,1=median,2=mode
     :param storfs: (list) all StORFs in unannotated genome
     :return: (float) the average gc percentage of all StORFs
     """
+    average_type = HardFilter.gc_range.value[1]  # 0=mean, 1=median, 2=mode
     if average_type == 0:  # mean
         total_gc = 0
         num_storfs = len(storfs)
@@ -90,6 +93,25 @@ def get_ave_gc(average_type: int, storfs: list) -> float:
         # get the most occurring gc count
         mode_largest = max(set(s_gc_len), key=s_gc_len.count)
         return float(mode_largest)
+
+
+def get_mode_stop_codons(storfs: list) -> list:
+    stop_codons = ["TAA", "TAG", "TGA"]
+    # get combinations of start, stop codons in StORF
+    stpperm = product(stop_codons, repeat=2) 
+    codon_delimit_count = dict()
+    for perm in stpperm:
+        codon_delimit_count[perm] = 0
+    for storf in storfs:
+        # count the stop-start codon pair
+        start = storf[0].find("Start_Stop=")+len("Start_Stop=")
+        start_codon = storf[0][start:start+3]
+        stop = storf[0].find("End_Stop=")+len("End_Stop=")
+        stop_codon = storf[0][stop:stop+3]
+        codon_id = (start_codon,stop_codon)
+        codon_delimit_count[codon_id] += 1
+    # return most abundant codon pair
+    return max(codon_delimit_count, key=codon_delimit_count.get) 
 
 
 def get_storf_loc(storf: list) -> tuple[int, int]:
@@ -239,15 +261,27 @@ def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
     return storf_group_values
 
 
-def set_group_values(storf_group: list, ave_gc: None | int) -> list:
+def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode_codons: tuple) -> list:
+    for i, storf in enumerate(storf_group):
+        start = storf[1][0].find("Start_Stop=")+len("Start_Stop=")
+        start_codon = storf[1][0][start:start+3]
+        stop = storf[1][0].find("End_Stop=")+len("End_Stop=")
+        stop_codon = storf[1][0][stop:stop+3]
+        codon_id = (start_codon,stop_codon)
+        if codon_id != mode_codons:
+            storf_group_values[i][1] = 0
+    return storf_group_values
+
+
+def set_group_values(storf_group: list, ave_gc: None | int, mode_stop_codons: None | list) -> list:
     """
     Adjust the coefficient value of all StORFs in group according to the user defined filters.
     :param storf_group: (list) A contiguous region of StORFs containing some overlap
     :param ave_gc: (float) The average gc percentage of each StORF
     :return: (list) An adjusted list of StORF values according to the selected filters.
     """
-    storf_group_values = [[s[0], 1] for s in storf_group]  # storf id and value
     # Default value of StORF is 1, if StORF doesn't obey restrictions then overwrite to 0
+    storf_group_values = [[s[0], 1] for s in storf_group]  # storf id and value
     # SOFT FILTERS: coefficient values equivalent to attributes of StORF, e.g. length
     if SoftFilter.storf_length.value is not None:
         storf_group_values = filter_favour_length(storf_group_values, storf_group)
@@ -262,6 +296,8 @@ def set_group_values(storf_group: list, ave_gc: None | int) -> list:
         storf_group_values = filter_by_gc_range(storf_group_values, storf_group, ave_gc)
     if HardFilter.stop_codons.value is not None:
         storf_group_values = filter_by_stop_codons(storf_group_values, storf_group)
+    if HardFilter.mode_stop_codons.value is not None:
+        storf_group_values = filter_by_mode_stop_codons(storf_group_values, storf_group, mode_stop_codons)
     return storf_group_values
 
 
@@ -400,18 +436,17 @@ def ip_filter(storfs: list) -> list:
     group = []  # overlapping group of StORFs
     obj_values = []
     # pre-compute average gc content
-    if HardFilter.gc_range.value is not None:
-        typ = HardFilter.gc_range.value[1]  # 0=mean, 1=median, 2=mode
-        ave_gc = get_ave_gc(typ, storfs)
-    else:
-        ave_gc = None
+    ave_gc = get_ave_gc(storfs) if HardFilter.gc_range.value is not None else None
+    # pre-compute mode StORF delimiters
+    mode_stop_codons = get_mode_stop_codons(storfs)
+    # TODO
     groud_id = 0
     # determine coefficient values of future IP variables
     for s, storf in enumerate(storfs):
         # StORF values are dependent on their group
         if is_next_new_group(storf, s, s_total):
             # create list of to be objective variables with coefficients for each StORF
-            obj_values += set_group_values(group, ave_gc)
+            obj_values += set_group_values(group, ave_gc, mode_stop_codons)
             # add weight capacity constraint to each group
             ip_set_group_constraint(prob, ip_vars, group, groud_id)
             group = [(s, storf)]  # init new group
@@ -419,7 +454,7 @@ def ip_filter(storfs: list) -> list:
         else:
             group.append((s, storf))
     # add values to last group of StORFs...  
-    obj_values += set_group_values(group, ave_gc)
+    obj_values += set_group_values(group, ave_gc, mode_stop_codons)
     # set weight capacity constraint for last group (auto-adds IP variable bounds)
     ip_set_group_constraint(prob, ip_vars, group, groud_id)
     # construct objective function (auto-adds IP variable bounds)
