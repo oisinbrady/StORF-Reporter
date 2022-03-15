@@ -19,9 +19,9 @@ class HardFilter(Enum):
     """
     overlap_range = [0, 50]  # nt
     size_range = [100, 50000]  # nt
-    gc_range = None  # [1000, 0]  # 10=percentage variance, 0=mean, 1=median, 2=mode
+    gc_range = [14, 0]  # 10=percentage variance, 0=mean, 1=median, 2=mode
     stop_codons = ["TAG","TGA","TAA"]
-    mode_stop_codons = False
+    mode_stop_codons = None
 
 
 class SoftFilter(Enum):
