@@ -17,9 +17,9 @@ class HardFilter(Enum):
     """
     Filters that bound the sub-set of final selected StORFs
     """
-    overlap_range = [0, 50]  # nt
-    size_range = [100, 50000]  # nt
-    gc_range = [14, 0]  # 10=percentage variance, 0=mean, 1=median, 2=mode
+    overlap_range = [0, 50]  # nt.
+    size_range = [100, 50000]  # nt.
+    gc_range = None#[0.45, 0]  # percentage variance, 0=mean, 1=median, 2=mode
     stop_codons = ["TAG","TGA","TAA"]
     mode_stop_codons = None
 
@@ -33,7 +33,7 @@ class SoftFilter(Enum):
         IF |"overlapping" group| > WeightConstraints.storf_group:
             THEN soft filters will decide which StORFs are taken as to maximise the objective function
     """
-    storf_length = True  # True=favour the largest StORFs (more value) in groups
+    storf_length = True# True  # True=favour the largest StORFs (more value) in groups
     gc_length = None  # True=favour the StORFs with highest gc% (more value) in groups
 
 
@@ -210,8 +210,8 @@ def filter_by_gc_range(storf_group_values: list, storf_group: list, ave_gc: floa
     :param ave_gc: (float) The average gc percentage of all StORFs in unannotated genome (see get_ave_gc())
     :return: (list) An adjusted list of StORF values according to gc constraint
     """
-    min_gc = ave_gc - (ave_gc * 0.05)
-    max_gc = ave_gc + (ave_gc * 0.05)
+    min_gc = ave_gc - (ave_gc * HardFilter.gc_range.value[0])
+    max_gc = ave_gc + (ave_gc * HardFilter.gc_range.value[0])
     for i, storf in enumerate(storf_group):
         if not min_gc <= len(re.findall('[GC]', storf[1][1])) <= max_gc:
             storf_group_values[i][1] = 0
