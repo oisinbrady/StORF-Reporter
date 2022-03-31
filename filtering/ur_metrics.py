@@ -2,6 +2,7 @@ import csv
 import os
 import re
 from itertools import permutations
+from math import ceil
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -15,7 +16,7 @@ ABSPATH = os.path.dirname(ABSPATH)  # absolute path to working directory
 
 def read_filtered(file_name: str) -> list:
     unfiltered_storfs = []
-    with open(f"../kpip_output/{file_name}") as storf_file:
+    with open(f"kpip_output/{file_name}") as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
@@ -150,20 +151,27 @@ def overlap_metric(storfs: list, genome_name: str, hss=False) -> list:
     overlaps = []
     for s, storf in enumerate(storfs):
         if is_next_new_group(storf, s, s_total):
-            # find all overlaps in previous contiguous group
-            for j in range(0, len(storfs) - 1):
-                locus_j = storfs[j][0][storfs[j][0].find(":") + 1: storfs[j][0].find("|")]
-                for k in range(j, len(storfs) - 1):
-                    locus_k = storfs[k][0][storfs[k][0].find(":") + 1: storfs[k][0].find("|")]
+            # calculate all overlaps in previous contiguous group
+            for j in range(0, len(con_group) - 1):
+                storf_j_id = con_group[j][1][0]
+                locus_j = storf_j_id[storf_j_id.find(":") + 1: storf_j_id.find("|")]
+                for k in range(j, len(con_group) - 1):
+                    storf_k_id = con_group[k][1][0]
+                    locus_k = storf_k_id[storf_k_id.find(":") + 1: storf_k_id.find("|")]
                     overlap = get_overlap(locus_j, locus_k)
                     if overlap is not None:
                         overlaps.append(overlap)
-            con_group = [(s, storf)]  # init new group
+            con_group = [(s, storf)]  # start finding new contig-group
         else:
             con_group.append((s, storf))
-    mean_overlap_len = round(sum(overlaps) / len(overlaps))
+    set_type = "hss" if hss else "unfiltered"
+    if len(overlaps) == 0:
+        print(f"{set_type} set has no overlaps, skipping distribution plotting...")
+        return [0, "N.A."]
+    mean_overlap_len = int(ceil(sum(overlaps) / len(overlaps)))  # round up
     lm = [s for s in overlaps]
-    g = sns.displot(data=lm, kind="ecdf")
+    print(f"writing {set_type} ecdf overlap plot ({len(overlaps)} overlaps)...")
+    g = sns.displot(data=lm, kind="ecdf")  # computationally expensive job
     g.set_axis_labels("overlap length (nt)", "Proportion")
     g.figure.savefig(graph_path + f"/{genome_name}_overlap_len_ecdf.png")
     # for csv data printing
@@ -179,6 +187,8 @@ def len_metric(storfs: list, genome_name: str, hss=False) -> list:
     smallest_storf = sl[0]
     # plot empirical cumulative distribution function, i.e., proportional StORF lengths
     lm = [len(s[1]) for s in sl]
+    set_type = "hss" if hss else "unfiltered"
+    print(f"writing {set_type} ecdf length plot ({total} storfs)...")
     g = sns.displot(data=lm, kind="ecdf")
     g.set_axis_labels("StORF length (nt)", "Proportion")
     g.figure.savefig(graph_path + f"/{genome_name}_len_ecdf.png")
@@ -290,7 +300,7 @@ def get_summary(unfilt_storfs: list, hss: list, filt_storfs: list) -> list:
 
 
 def write_csv_metrics(genome_name: str, data: list) -> None:
-    file_path = ABSPATH + f"/output/{genome_name}/{genome_name}_metrics.csv"
+    file_path = ABSPATH + f"/metrics/output/{genome_name}/{genome_name}_metrics.csv"
     header = [
         "storf_set_type",
         "total_storfs",
@@ -308,7 +318,7 @@ def write_csv_metrics(genome_name: str, data: list) -> None:
 
 
 def write_csv_summary(data: list, genome_name: str) -> None:
-    file_path = ABSPATH + f"/output/{genome_name}/{genome_name}_summary_metrics.csv"
+    file_path = ABSPATH + f"/metrics/output/{genome_name}/{genome_name}_summary_metrics.csv"
     header = [
         "unfiltered_storfs",
         "hss",
@@ -353,7 +363,7 @@ def metrics() -> None:
     # For each genome, produce metrics
     for i in range(0, len(unfiltered_ur)):
         genome_name = unfiltered_ur[i][:unfiltered_ur[i].find("_")]
-        print(f"processing {genome_name} metrics...")
+        print(f"\nprocessing {genome_name} metrics...")
         # Non-filtered StORFs
         unfiltered_storfs = read_unfiltered(unfiltered_ur[i])
 
