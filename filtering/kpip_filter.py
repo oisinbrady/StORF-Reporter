@@ -2,6 +2,7 @@ import collections
 import re
 from enum import Enum
 from itertools import product
+from math import ceil, floor
 
 import pulp
 
@@ -129,6 +130,49 @@ def get_storf_loc(storf: list) -> tuple[int, int]:
     start = int(locus[:locus.find("-")])
     stop = int(locus[locus.find("-") + 1:])
     return start, stop
+
+
+def is_plateau(percentile_bound: tuple[float, float], initial_m: float, storfs: list) -> bool:
+    # assume plateau as a rate of change (m) that is less than theta * initial_m
+    theta = 0.01  # threshold
+    m = rate_of_change(percentile_bound, storfs)
+    print(m)
+    return m/initial_m < theta
+
+
+def rate_of_change(percentile_bound: tuple[float, float], storfs: list) -> float:
+    lb = percentile_bound[0]
+    ub = percentile_bound[1]
+    print(f"ub={ub}")
+    lb_index = floor(lb*len(storfs))
+    ub_index = ceil(ub*len(storfs))
+    print(lb_index, ub_index, len(storfs))
+    delta_x = len(storfs[ub_index][1]) - len(storfs[lb_index][1])
+    delta_y = ub-lb
+    return delta_y/delta_x  # roc for first storf len to index of 50th percentile rounded
+
+
+def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
+    # get the StORF length (nt) at the plateau point of an ecdf distribution of StORF lengths
+    # returned length value can be upper bound of HardFilter.size_range
+    sorted_storfs = sorted(unfiltered_storfs, key=lambda s: len(s[1]))  # order StORFs by len
+    percentile_bound = [0.0, 0.5]
+    initial_m = rate_of_change(percentile_bound, sorted_storfs)
+    i = 0
+    lim = 100000
+    while not is_plateau(percentile_bound, initial_m, sorted_storfs) and i < lim:
+        lb = percentile_bound[1]
+        ub = (1 - lb)/2 + lb 
+        percentile_bound = [lb, ub]  # move to the next percentile slot of StORFs
+        # TODO N.b. iteretions tends towards infinity so lim is important, IS IT? WE HAVE THETA
+        i += 1
+    # mid point of percentile bound
+    mp = ((percentile_bound[1] - percentile_bound[0]) / 2) + percentile_bound[0]
+    mp_index = floor(mp*len(sorted_storfs))
+    # determine max StORF length allowed for filtering
+    return len(sorted_storfs[mp_index][1])
+
+
 
 
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
@@ -488,6 +532,13 @@ def main():
     genome_name = "staph"
 
     storfs = read_fasta(genome_name)
+    sorted_storfs = sorted(storfs, key=lambda s: len(s[1]))  # order StORFs by len
+    print(len(sorted_storfs[0][1]))
+    print(len(sorted_storfs[len(sorted_storfs)-1][1]))
+    max_size = get_len_ecdf_plateau(storfs)
+    print(max_size)
+    exit()
+
     storfs = ip_filter(storfs)
     write_fasta(storfs, genome_name)
 
