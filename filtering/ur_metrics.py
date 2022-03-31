@@ -12,6 +12,7 @@ from kpip_filter import is_next_new_group, get_start_stop_bases
 
 ABSPATH = os.path.abspath(__file__)
 ABSPATH = os.path.dirname(ABSPATH)  # absolute path to working directory
+PLOT = False  # if graphics are to be produced
 
 
 def read_filtered(file_name: str) -> list:
@@ -165,17 +166,23 @@ def overlap_metric(storfs: list, genome_name: str, hss=False) -> list:
         else:
             con_group.append((s, storf))
     set_type = "hss" if hss else "unfiltered"
-    if len(overlaps) == 0:
-        print(f"{set_type} set has no overlaps, skipping distribution plotting...")
+    try:
+        mean_overlap_len = int(ceil(sum(overlaps) / len(overlaps)))  # round up
+    except ZeroDivisionError:
+        if PLOT:
+            print(f"{set_type} set has no overlaps, skipping distribution plotting...")
         return [0, "N.A."]
-    mean_overlap_len = int(ceil(sum(overlaps) / len(overlaps)))  # round up
-    lm = [s for s in overlaps]
-    print(f"writing {set_type} ecdf overlap plot ({len(overlaps)} overlaps)...")
-    g = sns.displot(data=lm, kind="ecdf")  # computationally expensive job
-    g.set_axis_labels("overlap length (nt)", "Proportion")
-    g.figure.savefig(graph_path + f"/{genome_name}_overlap_len_ecdf.png")
-    # for csv data printing
-    return [len(overlaps), mean_overlap_len]
+    else:
+        lm = [s for s in overlaps]
+        if PLOT:
+            print(f"writing {set_type} ecdf overlap plot ({len(overlaps)} overlaps)...")
+            g = sns.displot(data=lm, kind="ecdf")  # computationally expensive job
+            g.set_axis_labels("overlap length (nt)", "Proportion")
+            g.figure.savefig(graph_path + f"/{genome_name}_overlap_len_ecdf.png")
+        # for csv data printing
+        return [len(overlaps), mean_overlap_len]
+    
+
 
 
 def len_metric(storfs: list, genome_name: str, hss=False) -> list:
@@ -188,10 +195,11 @@ def len_metric(storfs: list, genome_name: str, hss=False) -> list:
     # plot empirical cumulative distribution function, i.e., proportional StORF lengths
     lm = [len(s[1]) for s in sl]
     set_type = "hss" if hss else "unfiltered"
-    print(f"writing {set_type} ecdf length plot ({total} storfs)...")
-    g = sns.displot(data=lm, kind="ecdf")
-    g.set_axis_labels("StORF length (nt)", "Proportion")
-    g.figure.savefig(graph_path + f"/{genome_name}_len_ecdf.png")
+    if PLOT:
+        print(f"writing {set_type} ecdf length plot ({total} storfs)...")
+        g = sns.displot(data=lm, kind="ecdf")
+        g.set_axis_labels("StORF length (nt)", "Proportion")
+        g.figure.savefig(graph_path + f"/{genome_name}_len_ecdf.png")
     # for csv data printing
     return [total, mean, len(smallest_storf[1]), len(largest_storf[1])]
 
@@ -366,19 +374,18 @@ def metrics() -> None:
         print(f"\nprocessing {genome_name} metrics...")
         # Non-filtered StORFs
         unfiltered_storfs = read_unfiltered(unfiltered_ur[i])
-
         uf_data = len_metric(unfiltered_storfs, genome_name)
         uf_data += overlap_metric(unfiltered_storfs, genome_name)
         uf_data.insert(0, "unfiltered_storfs")
-        # Get high significance StORFs (HSS)
+        # High Significance StORFs (HSS)
         hss = get_hss(unfiltered_ur[i], unfiltered_storfs)
         hss_data = len_metric(hss, f"{genome_name}", hss=True)
         hss_data += overlap_metric(hss, f"{genome_name}", hss=True)
         hss_data.insert(0, "hss")
         csv_data = [uf_data, hss_data]
-        write_csv_metrics(genome_name, csv_data)
         filtered_storfs = read_filtered(kpip_output[i])
         summary_csv_data = get_summary(unfiltered_storfs, hss, filtered_storfs)
+        write_csv_metrics(genome_name, csv_data)
         write_csv_summary(summary_csv_data, genome_name)
 
 
