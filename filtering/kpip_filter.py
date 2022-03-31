@@ -1,9 +1,9 @@
+import collections
+import re
 from enum import Enum
 from itertools import product
 
 import pulp
-import re
-import collections
 
 """ Filters to match default behaviour of StORF_finder.py program is:
         - storf_length=True
@@ -19,9 +19,9 @@ class HardFilter(Enum):
     """
     overlap_range = [0, 50]  # nt.
     size_range = [100, 50000]  # nt.
-    gc_range = None#[0.45, 0]  # percentage variance, 0=mean, 1=median, 2=mode
-    stop_codons = ["TAG","TGA","TAA"]
-    mode_stop_codons = None
+    gc_range = None  # [0.45, 0]  # percentage variance, 0=mean, 1=median, 2=mode
+    stop_codons = ["TAG", "TGA", "TAA"]
+    mode_stop_codon = None
 
 
 class SoftFilter(Enum):
@@ -33,7 +33,7 @@ class SoftFilter(Enum):
         IF |"overlapping" group| > WeightConstraints.storf_group:
             THEN soft filters will decide which StORFs are taken as to maximise the objective function
     """
-    storf_length = True# True  # True=favour the largest StORFs (more value) in groups
+    storf_length = True  # True  # True=favour the largest StORFs (more value) in groups
     gc_length = None  # True=favour the StORFs with highest gc% (more value) in groups
 
 
@@ -63,7 +63,6 @@ def get_storf_delim(storf: list) -> tuple[list[int], list[int]]:
 def get_ave_gc(storfs: list) -> float:
     """
     The average percentage of G and C bases of all StORFs in unannotated genome
-    :param average_type: (int) 0=mean,1=median,2=mode
     :param storfs: (list) all StORFs in unannotated genome
     :return: (float) the average gc percentage of all StORFs
     """
@@ -95,23 +94,28 @@ def get_ave_gc(storfs: list) -> float:
         return float(mode_largest)
 
 
-def get_mode_stop_codons(storfs: list) -> list:
+def get_start_stop_bases(storf: list) -> tuple[str, str]:
+    start = storf[0].find("Start_Stop=") + len("Start_Stop=")
+    start_codon = storf[0][start:start + 3]
+    stop = storf[0].find("End_Stop=") + len("End_Stop=")
+    stop_codon = storf[0][stop:stop + 3]
+    return start_codon, stop_codon
+
+
+def get_mode_stop_codon(storfs: list) -> list:
     stop_codons = ["TAA", "TAG", "TGA"]
     # get combinations of start, stop codons in StORF
-    stpperm = product(stop_codons, repeat=2) 
+    stp_perm = product(stop_codons, repeat=2)
     codon_delimit_count = dict()
-    for perm in stpperm:
+    for perm in stp_perm:
         codon_delimit_count[perm] = 0
     for storf in storfs:
         # count the stop-start codon pair
-        start = storf[0].find("Start_Stop=")+len("Start_Stop=")
-        start_codon = storf[0][start:start+3]
-        stop = storf[0].find("End_Stop=")+len("End_Stop=")
-        stop_codon = storf[0][stop:stop+3]
-        codon_id = (start_codon,stop_codon)
+        start_codon, stop_codon = get_start_stop_bases(storf)
+        codon_id = (start_codon, stop_codon)
         codon_delimit_count[codon_id] += 1
     # return most abundant codon pair
-    return max(codon_delimit_count, key=codon_delimit_count.get) 
+    return max(codon_delimit_count, key=codon_delimit_count.get)
 
 
 def get_storf_loc(storf: list) -> tuple[int, int]:
@@ -164,7 +168,7 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
             if start_y >= stop_x or stop_y <= start_x:
                 # iff no overlap b/w pair
                 j += 1
-                continue 
+                continue
             elif start_y >= start_x and stop_y <= stop_x:
                 # iif StORF j fully embedded in i
                 ordered_by_value.pop(j)
@@ -182,7 +186,7 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     selected = [i[0] for i in ordered_by_value]
     for storf in storf_group_values:
         if storf[0] not in selected:
-            storf[1] = 0  # change co-efficient value to filter out disallowed StORFs
+            storf[1] = 0  # change coefficient value to filter out disallowed StORFs
     return storf_group_values
 
 
@@ -229,9 +233,9 @@ def filter_by_stop_codons(storf_group_values: list, storf_group: list) -> list:
     """
     allowed_codons = HardFilter.stop_codons.value
     for i, storf in enumerate(storf_group):
-        l = len(storf[1][1])
+        sl = len(storf[1][1])
         start_codon = storf[1][1][0:3]
-        stop_codon = storf[1][1][l-4:l-1]
+        stop_codon = storf[1][1][sl - 4:sl - 1]
         if start_codon not in allowed_codons or stop_codon not in allowed_codons:
             storf_group_values[i][1] *= 0
     return storf_group_values
@@ -261,21 +265,22 @@ def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
     return storf_group_values
 
 
-def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode_codons: tuple) -> list:
+def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode_codon: list) -> list:
     for i, storf in enumerate(storf_group):
-        start = storf[1][0].find("Start_Stop=")+len("Start_Stop=")
-        start_codon = storf[1][0][start:start+3]
-        stop = storf[1][0].find("End_Stop=")+len("End_Stop=")
-        stop_codon = storf[1][0][stop:stop+3]
-        codon_id = (start_codon,stop_codon)
-        if codon_id != mode_codons:
+        start = storf[1][0].find("Start_Stop=") + len("Start_Stop=")
+        start_codon = storf[1][0][start:start + 3]
+        stop = storf[1][0].find("End_Stop=") + len("End_Stop=")
+        stop_codon = storf[1][0][stop:stop + 3]
+        codon_id = (start_codon, stop_codon)
+        if codon_id != mode_codon:
             storf_group_values[i][1] = 0
     return storf_group_values
 
 
-def set_group_values(storf_group: list, ave_gc: None | int, mode_stop_codons: None | list) -> list:
+def set_group_values(storf_group: list, ave_gc: None | int, mode_stop_codon: None | list) -> list:
     """
     Adjust the coefficient value of all StORFs in group according to the user defined filters.
+    :param mode_stop_codon: the most frequent stop codon
     :param storf_group: (list) A contiguous region of StORFs containing some overlap
     :param ave_gc: (float) The average gc percentage of each StORF
     :return: (list) An adjusted list of StORF values according to the selected filters.
@@ -296,8 +301,8 @@ def set_group_values(storf_group: list, ave_gc: None | int, mode_stop_codons: No
         storf_group_values = filter_by_gc_range(storf_group_values, storf_group, ave_gc)
     if HardFilter.stop_codons.value is not None:
         storf_group_values = filter_by_stop_codons(storf_group_values, storf_group)
-    if HardFilter.mode_stop_codons.value is not None:
-        storf_group_values = filter_by_mode_stop_codons(storf_group_values, storf_group, mode_stop_codons)
+    if HardFilter.mode_stop_codon.value is not None:
+        storf_group_values = filter_by_mode_stop_codons(storf_group_values, storf_group, mode_stop_codon)
     return storf_group_values
 
 
@@ -326,13 +331,13 @@ def is_next_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool
         return False
 
 
-def read_fasta() -> list:
+def read_fasta(genome_name: str) -> list:
     """
     Convert unannotated genome ".fasta" file to a list of StORFs.
     :return: (list) A list of all StORFs in fasta file input
     """
     unfiltered_storfs = []
-    with open("../../testin/E-coli_output_no_filt.fasta") as storf_file:
+    with open(f"input/{genome_name}_no_filt.fasta") as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
@@ -343,13 +348,14 @@ def read_fasta() -> list:
     return unfiltered_storfs
 
 
-def write_fasta(filtered_storfs: list) -> None:
+def write_fasta(filtered_storfs: list, genome_name: str) -> None:
     """
     Convert the final filtered subset of StORFs into a fasta file
+    :param genome_name: Name of the genome
     :param filtered_storfs: (list) StORFs from optimal knapsack solution
     :return: (None)
     """
-    f = open("../../testout/oisin_output/output.fasta", "w")
+    f = open(f"kpip_output/{genome_name}_output.fasta", "w")
     for storf in filtered_storfs:
         f.write(f"{storf[0]}{storf[1]}")
 
@@ -438,25 +444,24 @@ def ip_filter(storfs: list) -> list:
     # pre-compute average gc content
     ave_gc = get_ave_gc(storfs) if HardFilter.gc_range.value is not None else None
     # pre-compute mode StORF delimiters
-    mode_stop_codons = get_mode_stop_codons(storfs)
-    # TODO
-    groud_id = 0
+    mode_stop_codon = get_mode_stop_codon(storfs)
+    group_id = 0
     # determine coefficient values of future IP variables
     for s, storf in enumerate(storfs):
         # StORF values are dependent on their group
         if is_next_new_group(storf, s, s_total):
             # create list of to be objective variables with coefficients for each StORF
-            obj_values += set_group_values(group, ave_gc, mode_stop_codons)
+            obj_values += set_group_values(group, ave_gc, mode_stop_codon)
             # add weight capacity constraint to each group
-            ip_set_group_constraint(prob, ip_vars, group, groud_id)
+            ip_set_group_constraint(prob, ip_vars, group, group_id)
             group = [(s, storf)]  # init new group
-            groud_id += 1
+            group_id += 1
         else:
             group.append((s, storf))
     # add values to last group of StORFs...  
-    obj_values += set_group_values(group, ave_gc, mode_stop_codons)
+    obj_values += set_group_values(group, ave_gc, mode_stop_codon)
     # set weight capacity constraint for last group (auto-adds IP variable bounds)
-    ip_set_group_constraint(prob, ip_vars, group, groud_id)
+    ip_set_group_constraint(prob, ip_vars, group, group_id)
     # construct objective function (auto-adds IP variable bounds)
     ip_set_obj_func(prob, obj_values, ip_vars)
     # add knapsack sum capacity constraint
@@ -466,7 +471,6 @@ def ip_filter(storfs: list) -> list:
     # get selected StORFs from IP solution
     selected = {}
     for var in prob.variables():
-        #print(f"{var.name}={pulp.value(var)}")
         selected[var.name] = pulp.value(var)
     ordered_selected = collections.OrderedDict(sorted(selected.items(), key=lambda t: int(t[0][2:])))
     final_filter = []
@@ -481,9 +485,11 @@ def main():
     Filter the unannotated genome according to the user's selections
     :return: (None)
     """
-    storfs = read_fasta()
+    genome_name = "staph"
+
+    storfs = read_fasta(genome_name)
     storfs = ip_filter(storfs)
-    write_fasta(storfs)
+    write_fasta(storfs, genome_name)
 
 
 if __name__ == '__main__':

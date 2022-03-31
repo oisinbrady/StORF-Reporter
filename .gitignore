@@ -11,5 +11,6 @@ swiss/
 
 1045010.61.PATRIC.gff
 
-filtering/ip_model.txt
-
+swissprot/
+__pycache__/
+notes
