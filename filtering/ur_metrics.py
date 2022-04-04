@@ -58,6 +58,14 @@ def get_hss(file_name: str, unfiltered_storfs: list) -> list:
     # N.b. e-value and bit-score heavy reliance on database in use
     bm_sorted = sorted(blastx_matches, key=lambda s: (s[2], s[10], s[11]), reverse=True)
     hss = [s for s in bm_sorted[:round(0.01 * len(blastx_matches))]]  # get top 1%
+    # problem: this is not a good subset for overview, filtering is too strict
+    # TODO instead of top 1%, divide into thresholds for very good, good, fair, bad etc. (based of pident, bitscore, e-value)
+    # create barchart for frequencies of each category 
+
+    # ~10-20% sub-sample of all hss (using montecarlo sub-sampling) = a
+    # all "very good" StORFs = b
+    # create a PCA of A and B for comparison
+    # create PCA of ~10-20% montecarlo subsample of all StORFs = C
     hss = get_blastx_sequences(hss, unfiltered_storfs)
     hss = filter_embedded_storfs(hss)
     return hss
@@ -146,6 +154,12 @@ def filter_embedded_storfs(storfs) -> list:
 
 
 def overlap_metric(storfs: list, genome_name: str, hss=False) -> list:
+    # TODO check overlap pair strands
+    # e.g. iff StORFs most StORFs overlap on the same strand: remove all StORFs on other strand from the filter
+    # e.g. iff overlap different-same strand ratio = 80:20, remove all StORFs in same strand overlap subset
+
+
+
     graph_path = get_graph_path(hss, genome_name)
     con_group = []  # StORF contig group
     s_total = len(storfs)
