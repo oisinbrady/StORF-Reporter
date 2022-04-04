@@ -1,11 +1,10 @@
 import collections
 import re
+import pulp
 from enum import Enum
 from itertools import product
 from math import ceil, floor
-
-import pulp
-
+from typing import Union
 """ Filters to match default behaviour of StORF_finder.py program is:
         - storf_length=True
         - overlap_range=[0, 50]
@@ -321,7 +320,7 @@ def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode
     return storf_group_values
 
 
-def set_group_values(storf_group: list, ave_gc: None | int, mode_stop_codon: None | list) -> list:
+def set_group_values(storf_group: list, ave_gc: Union[None, int], mode_stop_codon: Union[None, list]) -> list:
     """
     Adjust the coefficient value of all StORFs in group according to the user defined filters.
     :param mode_stop_codon: the most frequent stop codon

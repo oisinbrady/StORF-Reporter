@@ -5,6 +5,7 @@ from itertools import permutations
 from math import ceil
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import pandas as pd
 import seaborn as sns
 
@@ -36,7 +37,7 @@ def read_unfiltered(file_name: str) -> list:
 def read_blastx(file_name: str) -> list:
     matches = []
     file_name = file_name[:file_name.find(".")] + ".out"
-    with open(f"metrics/blastx/output/{file_name}") as storf_file:
+    with open(f"metrics/input/blastx/output/{file_name}") as storf_file:
         for line in storf_file:
             matches.append(line)
     return matches
@@ -153,18 +154,29 @@ def filter_embedded_storfs(storfs) -> list:
     return [storf for i, storf in enumerate(storfs) if i not in embedded_storfs]
 
 
-def overlap_metric(storfs: list, genome_name: str, hss=False) -> list:
+def get_overlaps(con_group: list) -> list:
+    overlaps = []
+    for j in range(0, len(con_group) - 1):
+        storf_j_id = con_group[j][1][0]
+        locus_j = storf_j_id[storf_j_id.find(":") + 1: storf_j_id.find("|")]
+        for k in range(j, len(con_group) - 1):
+            storf_k_id = con_group[k][1][0]
+            locus_k = storf_k_id[storf_k_id.find(":") + 1: storf_k_id.find("|")]
+            overlap = get_overlap(locus_j, locus_k)
+            if overlap is not None:
+                overlaps.append(overlap)
+    return overlaps
+
+
+
+def overlap_metric(storf_set: list) -> dict():
     # TODO check overlap pair strands
     # e.g. iff StORFs most StORFs overlap on the same strand: remove all StORFs on other strand from the filter
     # e.g. iff overlap different-same strand ratio = 80:20, remove all StORFs in same strand overlap subset
-
-
-
-    graph_path = get_graph_path(hss, genome_name)
+    s_total = len(storf_set)
     con_group = []  # StORF contig group
-    s_total = len(storfs)
     overlaps = []
-    for s, storf in enumerate(storfs):
+    for s, storf in enumerate(storf_set):
         if is_next_new_group(storf, s, s_total):
             # calculate all overlaps in previous contiguous group
             for j in range(0, len(con_group) - 1):
@@ -179,71 +191,17 @@ def overlap_metric(storfs: list, genome_name: str, hss=False) -> list:
             con_group = [(s, storf)]  # start finding new contig-group
         else:
             con_group.append((s, storf))
-    set_type = "hss" if hss else "unfiltered"
-    try:
-        mean_overlap_len = int(ceil(sum(overlaps) / len(overlaps)))  # round up
-    except ZeroDivisionError:
-        if PLOT:
-            print(f"{set_type} set has no overlaps, skipping distribution plotting...")
-        return [0, "N.A."]
-    else:
-        lm = [s for s in overlaps]
-        if PLOT:
-            print(f"writing {set_type} ecdf overlap plot ({len(overlaps)} overlaps)...")
-            g = sns.displot(data=lm, kind="ecdf")  # computationally expensive job
-            g.set_axis_labels("overlap length (nt)", "Proportion")
-            g.figure.savefig(graph_path + f"/{genome_name}_overlap_len_ecdf.png")
-        # for csv data printing
-        return [len(overlaps), mean_overlap_len]
-    
+    return overlaps
 
 
-
-def len_metric(storfs: list, genome_name: str, hss=False) -> list:
-    graph_path = get_graph_path(hss, genome_name)
-    sl = [storf for storf in sorted(storfs, key=lambda x: len(x[1]))]
-    total = sum(len(s[1]) for s in sl)
-    mean = round(total / len(sl))
-    largest_storf = sl[len(sl) - 1]
-    smallest_storf = sl[0]
-    # plot empirical cumulative distribution function, i.e., proportional StORF lengths
-    lm = [len(s[1]) for s in sl]
-    set_type = "hss" if hss else "unfiltered"
-    if PLOT:
-        print(f"writing {set_type} ecdf length plot ({total} storfs)...")
-        g = sns.displot(data=lm, kind="ecdf")
-        g.set_axis_labels("StORF length (nt)", "Proportion")
-        g.figure.savefig(graph_path + f"/{genome_name}_len_ecdf.png")
-    # for csv data printing
-    return [total, mean, len(smallest_storf[1]), len(largest_storf[1])]
-
-
-def gc_metric(storfs: list) -> None:
-    gc = {}
-    for i, storf in enumerate(storfs):
+def gc_metric(contig_group: list) -> list:
+    gc_percentages = []
+    for _,storf in contig_group:
         sequence = storf[1]
         gc_count = len(re.findall('[GC]', sequence))
         nt_count = len(re.findall('[AGTC]', sequence))
-        storf_gc_percentage = gc_count / nt_count
-        gc[f"{i}"] = storf_gc_percentage
-    gc_sum = sum(s for s in gc.values())
-    average_storf_gc_percentage = gc_sum / len(storfs) * 100
-    print(f"StORF average GC percentage: {average_storf_gc_percentage}")
-    # get variance from genome gc
-    genome_gc_total = 0
-    nt_count = 0
-    with open("../Genomes/E-coli/E-coli.fa") as genome:
-        for line in genome:
-            if line[0] != ">":
-                nt_count += len(re.findall('[AGTC]', line))  # exclude undetermined nucleotides
-                genome_gc_total += len(re.findall('[GC]', line))
-    genome_gc = genome_gc_total / nt_count * 100
-    print(f"Original genome GC percentage: {genome_gc}\n")
-    # plot
-    lm = [s for s in list(gc.values())]
-    g = sns.displot(data=lm, bins=30)
-    g.set_axis_labels("gc percentage", "Count")
-    plt.show()
+        gc_percentages.append(gc_count / nt_count)
+    return gc_percentages
 
 
 def kmer_metric(storfs: list, k: int):
@@ -366,6 +324,55 @@ def get_storf_delim(storf: list) -> tuple[list[int], list[int]]:
     return colon_delimiters, pipe_delimiters
 
 
+def normalise(df: pd.DataFrame) -> pd.DataFrame:
+    for storf_metric in df.columns:
+        df[storf_metric] = df[storf_metric] / df[storf_metric].max()
+    return df
+
+
+def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
+    # TODO this needs a refactor
+    # ALSO, metrics for:
+        # contig sizes
+        # sense/anti-sense strand
+        # overlap pair strands (same or different?)
+    con_group = []  # StORF contig group
+    overlaps = []
+    set_length = len(storf_set)
+    all_storf_metrics = []
+    for s, storf in enumerate(storf_set):
+        # get metrics for each contig StORF group
+        if is_next_new_group(storf, s, set_length):
+            gc_perc = gc_metric(con_group)
+            lengths = [len(s[1][1]) for s in con_group]
+            overlaps = get_overlaps(con_group)  # list of (1 to 1/Many)
+            storf_ave_overlap = sum(overlaps)/len(overlaps) if len(overlaps) != 0 else "N.a"
+            con_storf_metrics = [[] for i in con_group]
+            for i in range(0, len(con_storf_metrics)):
+                if len(overlaps) > 0:
+                    storf_total_overlaps = len(overlaps)
+                    storf_ave_overlap = sum(overlaps)/storf_total_overlaps
+                else:
+                    storf_ave_overlap = 0
+                    storf_total_overlaps = 0
+                con_storf_metrics[i].append([gc_perc[i], lengths[i], storf_ave_overlap, storf_total_overlaps]) 
+            for storf_metrics in con_storf_metrics:
+                for metric in storf_metrics:
+                    all_storf_metrics.append(metric)
+                    
+            con_group = [(s, storf)]  # start finding new contig-group
+        else:
+            con_group.append((s, storf))
+
+    data = pd.DataFrame(all_storf_metrics)
+    for storf_metric in data.columns:  # normalise the values
+        data[storf_metric] = data[storf_metric] / data[storf_metric].max()
+    data.columns = ["gc_percentage", "size", "average_overlap_size", "total_overlaps"]
+    print(data)
+    return data
+
+
+
 def metrics() -> None:
     # N.b. see ../Genomes/x/x_metrics.csv for full x genome metrics
     unfiltered_ur = [
@@ -382,25 +389,26 @@ def metrics() -> None:
         "staph_output.fasta",
         "myco_output.fasta"
     ]
+    genome_metrics = []
     # For each genome, produce metrics
     for i in range(0, len(unfiltered_ur)):
         genome_name = unfiltered_ur[i][:unfiltered_ur[i].find("_")]
         print(f"\nprocessing {genome_name} metrics...")
-        # Non-filtered StORFs
         unfiltered_storfs = read_unfiltered(unfiltered_ur[i])
-        uf_data = len_metric(unfiltered_storfs, genome_name)
-        uf_data += overlap_metric(unfiltered_storfs, genome_name)
-        uf_data.insert(0, "unfiltered_storfs")
-        # High Significance StORFs (HSS)
-        hss = get_hss(unfiltered_ur[i], unfiltered_storfs)
-        hss_data = len_metric(hss, f"{genome_name}", hss=True)
-        hss_data += overlap_metric(hss, f"{genome_name}", hss=True)
-        hss_data.insert(0, "hss")
-        csv_data = [uf_data, hss_data]
-        filtered_storfs = read_filtered(kpip_output[i])
-        summary_csv_data = get_summary(unfiltered_storfs, hss, filtered_storfs)
-        write_csv_metrics(genome_name, csv_data)
-        write_csv_summary(summary_csv_data, genome_name)
+        hss = get_hss(unfiltered_ur[i], unfiltered_storfs)  # High Significance StORFs (HSS)
+        unfiltered_storfs = [s for s in unfiltered_storfs if s not in hss]
+        uf_data = get_metrics_dataframe(unfiltered_storfs)
+        hss_data = get_metrics_dataframe(hss)
+        uf_data.insert(3, 'set_type', 'unfiltered_storfs')
+        hss_data.insert(3, 'set_type', 'HSS')
+        all_data = pd.concat([uf_data, hss_data])
+
+        ax = sns.stripplot(x="size", y="gc_percentage", hue="set_type", data=all_data, linewidth=1)
+        ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
+        ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
+        #ax = sns.stripplot(x="size", y="average_overlap_size", data=uf_data, linewidth=1)
+        plt.show()
+        exit()
 
 
 def main():
