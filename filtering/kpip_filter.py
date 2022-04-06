@@ -488,10 +488,11 @@ def set_filter_bounds(storfs) -> None:
 
     # derive default bounds by non-outlying StORF distribution ranges for each attribute
     if FILTERS.min_gc is None or FILTERS.max_gc is None:
-        sorted_storfs = sorted(storfs, key=lambda s: len(re.findall('[GC]', s[1])))
+        sorted_storfs = sorted(storfs, key=lambda s: len(re.findall('[GC]', s[1]))/len(s[1]))
         gc_boxplot = propability_distribution(sorted_storfs)
-        q1_gc = len(re.findall('[GC]', gc_boxplot[0][1]))
-        q3_gc = len(re.findall('[GC]', gc_boxplot[1][1]))
+        q1_gc = len(re.findall('[GC]', gc_boxplot[0][1])) / len(gc_boxplot[0][1]) * 100
+        q3_gc = len(re.findall('[GC]', gc_boxplot[2][1])) / len(gc_boxplot[0][1]) * 100
+        # print(q1_gc, q3_gc)
         lb, ub = get_bounds(q1_gc, q3_gc)
         if FILTERS.min_gc is None:
             FILTERS.min_gc = lb
@@ -515,14 +516,18 @@ def set_filter_bounds(storfs) -> None:
 
     if FILTERS.min_orf is None or FILTERS.max_orf is None:
         sorted_storfs = sorted(storfs, key=lambda s: len(s[1]))
-        boxplot = propability_distribution(sorted_storfs)
-        q1_len = len(gc_boxplot[0][1])
-        q3_len = len(gc_boxplot[1][1])
+        len_boxplot = propability_distribution(sorted_storfs)
+        q1_len = len(len_boxplot[0][1])
+        q3_len = len(len_boxplot[2][1])
         lb, ub = get_bounds(q1_len, q3_len)
         if FILTERS.min_orf is None:
             FILTERS.min_orf = lb
+            print("3")
+            print(FILTERS.min_orf)
         if FILTERS.max_orf is None:
             FILTERS.max_orf = ub
+            print("4")
+            print(FILTERS.max_orf)
     
 
 def ip_filter(storfs: list) -> list:
