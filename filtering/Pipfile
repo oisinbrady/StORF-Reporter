@@ -9,6 +9,7 @@ seaborn = "*"
 matplotlib = "*"
 pandas = "*"
 pyqt5 = "*"
+argparse = "*"
 
 [dev-packages]
 
