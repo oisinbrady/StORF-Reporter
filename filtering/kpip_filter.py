@@ -1,6 +1,7 @@
 import collections
 import re
 import pulp
+import argparse
 from enum import Enum
 from itertools import product
 from math import ceil, floor
@@ -11,6 +12,8 @@ from typing import Union
         - size_range=[100, 50000] 
         - stop_codons=["TAG","TGA","TAA"]
 """
+
+FILTERS = None  # set by argparse at run-time
 
 
 class HardFilter(Enum):
@@ -74,7 +77,7 @@ def get_ave_gc(storfs: list) -> float:
             total_gc += len(re.findall('[GC]', storf[1]))
         return float(total_gc / num_storfs)
     elif average_type == 1:  # median
-        # order StORFs by length
+        # order StORFs by gc count
         ord_storfs = sorted(storfs, key=lambda x: len(re.findall('[GC]', x[1])))
         mid = (len(ord_storfs) - 1) // 2
         if len(ord_storfs) % 2:  # odd
@@ -374,13 +377,13 @@ def is_next_new_group(storf: list, storf_id: int, total_num_storfs: int) -> bool
         return False
 
 
-def read_fasta(genome_name: str) -> list:
+def read_fasta() -> list:
     """
     Convert unannotated genome ".fasta" file to a list of StORFs.
     :return: (list) A list of all StORFs in fasta file input
     """
     unfiltered_storfs = []
-    with open(f"input/{genome_name}_no_filt.fasta") as storf_file:
+    with open(FILTERS.fasta) as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
@@ -462,6 +465,66 @@ def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
         prob += c
 
 
+def propability_distribution(x_sorted_storfs: list) -> list:
+    # I.E. box and whiskers plot for StORF attribute ('x')
+    total_storfs = len(x_sorted_storfs)
+    q1 = x_sorted_storfs[round(total_storfs*0.25)]
+    q2 = x_sorted_storfs[round(total_storfs*0.5)]
+    q3 = x_sorted_storfs[round(total_storfs*0.75)]
+    return [q1, q2, q3]
+
+
+def get_bounds(q1: int, q3: int) -> list[int,int]:
+    iqr = q3 - q1  # interquartile range
+    # lower bound excluding "outliers"; boxplot strategy
+    lb = q1 - 1.5 * iqr 
+    ub = q3 + 1.5 * iqr 
+    return [lb, ub]
+
+
+def set_filter_bounds(storfs) -> None:
+    if FILTERS.prune_ecdf:
+        FILTERS.max_orf = get_len_ecdf_plateau(storfs)
+
+    # derive default bounds by non-outlying StORF distribution ranges for each attribute
+    if FILTERS.min_gc is None or FILTERS.max_gc is None:
+        sorted_storfs = sorted(storfs, key=lambda s: len(re.findall('[GC]', s[1])))
+        gc_boxplot = propability_distribution(sorted_storfs)
+        q1_gc = len(re.findall('[GC]', gc_boxplot[0][1]))
+        q3_gc = len(re.findall('[GC]', gc_boxplot[1][1]))
+        lb, ub = get_bounds(q1_gc, q3_gc)
+        if FILTERS.min_gc is None:
+            FILTERS.min_gc = lb
+            print("1")
+            print(FILTERS.min_gc)
+        if FILTERS.max_gc is None:
+            FILTERS.max_gc = ub
+            print("2")
+            print(FILTERS.max_gc)
+
+    # if FILTERS.min_olap is None or if FILTERS.max_olap is None:
+        #overlap_boxplot = propability_distribution(storfs)
+        #if FILTERS.min_olap is None:
+        #    FILTERS.min_olap = boxplot[0]
+        #if FILTERS.max_olap is None:
+        #    FILTERS.max_olap = boxplot[4]
+        #if FILTERS.min_olap is None:
+        #    return
+        #if FILTERS.max_olap is None:
+        #    return
+
+    if FILTERS.min_orf is None or FILTERS.max_orf is None:
+        sorted_storfs = sorted(storfs, key=lambda s: len(s[1]))
+        boxplot = propability_distribution(sorted_storfs)
+        q1_len = len(gc_boxplot[0][1])
+        q3_len = len(gc_boxplot[1][1])
+        lb, ub = get_bounds(q1_len, q3_len)
+        if FILTERS.min_orf is None:
+            FILTERS.min_orf = lb
+        if FILTERS.max_orf is None:
+            FILTERS.max_orf = ub
+    
+
 def ip_filter(storfs: list) -> list:
     """
     Filter StORFs in unannotated genome file using integer programming
@@ -476,6 +539,9 @@ def ip_filter(storfs: list) -> list:
         - tc = capacity of total selected StORFs
     - All other constraints are selected by the user and so the model is defined accordingly
     """
+    set_filter_bounds(storfs)
+    exit()
+
     # initialise IP instance
     prob = pulp.LpProblem("StORF_IP_Filter", pulp.LpMaximize)
     s_total = len(storfs)
@@ -523,21 +589,38 @@ def ip_filter(storfs: list) -> list:
     return final_filter
 
 
+def init_argparse():
+    parser = argparse.ArgumentParser(description='StORF filtering parameters')
+    parser.add_argument('-f', action="store", dest='fasta', required=True,
+        help='Input FASTA File')
+    parser.add_argument('-min_orf', action="store", dest='min_orf', type=int,
+        help='Minimum StORF size in nt')
+    parser.add_argument('-max_orf', action="store", dest='max_orf', type=int,
+        help='Maximum StORF size in nt')
+    parser.add_argument('-min_olap', action="store", dest='min_olap', type=int,
+        default=0, help='Maximum StORF overlap size in nt')
+    parser.add_argument('-max_olap', action="store", dest='max_olap', type=int,
+        help='Maximum StORF overlap size in nt')
+    parser.add_argument('-min_gc', action="store", dest='min_gc', type=float,
+        help='Minimum gc percentage of StORFs as float')
+    parser.add_argument('-max_gc', action="store", dest='max_gc', type=float,
+        help='Maximum gc percentage of StORFs as float')
+    parser.add_argument('-codons', action="store", dest='stop_codons', default="TAG,TGA,TAA",
+        help='Default - (\'TAG,TGA,TAA\'): List Stop Codons to use')
+
+    # I.e. remove StORFs at the plateau region of StORF length ECDF - HSS commonly not found here
+    parser.add_argument('-prune_ecdf', action="store", dest='prune_ecdf', default=False, type=eval, choices=[True, False],
+                        help='Default - False: prune StORFs out of 90th percentile of length ECDF')
+    global FILTERS
+    FILTERS = parser.parse_args()
+
+
 def main():
     """
     Filter the unannotated genome according to the user's selections
-    :return: (None)
     """
-    genome_name = "staph"
-
-    storfs = read_fasta(genome_name)
-    sorted_storfs = sorted(storfs, key=lambda s: len(s[1]))  # order StORFs by len
-    print(len(sorted_storfs[0][1]))
-    print(len(sorted_storfs[len(sorted_storfs)-1][1]))
-    max_size = get_len_ecdf_plateau(storfs)
-    print(max_size)
-    exit()
-
+    init_argparse()
+    storfs = read_fasta()
     storfs = ip_filter(storfs)
     write_fasta(storfs, genome_name)
 
