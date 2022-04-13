@@ -19,42 +19,54 @@ ABSPATH = os.path.dirname(ABSPATH)  # absolute path to working directory
 OPTIONS = None  # argparse run-time commands
 
 
-def read_unfiltered(file_name: str) -> list:
+# N.b. see ../Genomes/x/x_metrics.csv for full x genome metrics
+UNFILTERED_UR = [
+"input/bascillus_no_filt.fasta",
+"input/E-coli_no_filt.fasta",
+"input/caul_no_filt.fasta",
+"input/staph_no_filt.fasta",
+"input/myco_no_filt.fasta"
+]
+KPIP_OUTPUT = [
+    "kpip_output/bascillus_output.fasta",
+    "kpip_output/E-coli_output.fasta",
+    "kpip_output/caul_output.fasta",
+    "kpip_output/staph_output.fasta",
+    "kpip_output/myco_output.fasta"
+]
+BLASTX_FILES = [
+    "metrics/input/blastx/output/bascillus_no_filt.out",
+    "metrics/input/blastx/output/caul_no_filt.out",
+    "metrics/input/blastx/output/E-coli_no_filt.out",
+    "metrics/input/blastx/output/myco_no_filt.out",
+    "metrics/input/blastx/output/staph_no_filt.out"
+]
+
+
+def read_unfiltered(file_path: str) -> list:
     uf_storfs = []
-    with open(f"input/{file_name}") as storf_file:
+    with open(file_path) as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 uf_storfs.append([line, next(storf_file)])
     return uf_storfs
 
 
-def read_filtered(file_name: str) -> list:
+def read_filtered(file_path: str) -> list:
     unfiltered_storfs = []
-    with open(f"kpip_output/{file_name}") as storf_file:
+    with open(file_path) as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
     return unfiltered_storfs
 
 
-def read_blastx(file_name: str) -> list:
+def read_blastx(file_path: str) -> list:
     matches = []
-    if OPTIONS.blastx is not None:
-        file_name = OPTIONS.blastx
-    else:
-        file_name = file_name + "_no_filt.out"
-    with open(f"metrics/input/blastx/output/{file_name}") as storf_file:
+    with open(file_path) as storf_file:
         for line in storf_file:
             matches.append(line.split())
     return matches
-
-
-def get_graph_path(hss: bool, genome_name: str) -> str:
-    if hss:
-        graph_path = ABSPATH + f"/metrics/output/{genome_name}/hss_metrics"
-    else:
-        graph_path = ABSPATH + f"/metrics/output/{genome_name}/unfiltered_storf_metrics"
-    return graph_path
 
 
 def remove_embedded_storfs(blastx_matches: list) -> list:
@@ -80,11 +92,10 @@ def print_hss_group_info(hss_groups: list) -> None:
         print(f"\t\tHSS_{g+1} StORFs: {len(group)}")
 
 
-def get_hss(file_name: str, unfiltered_storfs: list) -> list[list, list]:
+def get_hss(unfiltered_storfs: list, blastx_matches: list) -> list[list, list]:
     # TODO refactor
     print("\tDetermining HSS datasets...")
     # TODO need a lot of research on these metrics for HSS definition
-    blastx_matches = read_blastx(file_name)
     # matched_subset = monte_carlo_subsambple(blastx_matches, 0.1)  # 10% random subsample
     # https://www.biostars.org/p/187230/
     print("\t\tFiltering duplicate & fully-embedded StORFs")
@@ -163,10 +174,10 @@ def remove_repeat_storfs(blastx_matches: list) -> list:
 def get_overlaps(con_group: list) -> list:
     overlaps = []
     for j in range(0, len(con_group) - 1):
-        storf_j_id = con_group[j][1][0]
+        storf_j_id = con_group[j][0]
         locus_j = storf_j_id[storf_j_id.find(":") + 1: storf_j_id.find("|")]
         for k in range(j, len(con_group) - 1):
-            storf_k_id = con_group[k][1][0]
+            storf_k_id = con_group[k][0]
             locus_k = storf_k_id[storf_k_id.find(":") + 1: storf_k_id.find("|")]
             start_j, stop_j = get_start_stop(locus_j)
             start_k, stop_k = get_start_stop(locus_k)
@@ -182,7 +193,7 @@ def get_overlaps(con_group: list) -> list:
 
 def gc_metric(contig_group: list) -> list:
     gc_percentages = []
-    for _,storf in contig_group:
+    for storf in contig_group:
         sequence = storf[1]
         gc_count = len(re.findall('[GC]', sequence))
         nt_count = len(re.findall('[AGTC]', sequence))
@@ -252,34 +263,25 @@ def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
     overlaps = []
     set_length = len(storf_set)
     all_storf_metrics = []
-
-    print(set_length)
     con_groups = get_con_groups(storf_set)
-    print(con_group)
-    exit()
-
-    for s, storf in enumerate(storf_set):
+    for group in con_groups:
         # get metrics for each contig StORF group
-        if is_next_new_group(storf, s, set_length):
-            gc_perc = gc_metric(con_group)
-            lengths = [len(s[1][1]) for s in con_group]
-            overlaps = get_overlaps(con_group)  # list of (1 to 1/Many)
-            storf_ave_overlap = sum(overlaps)/len(overlaps) if len(overlaps) != 0 else "N.a"
-            con_storf_metrics = [[] for i in con_group]
-            for i in range(0, len(con_storf_metrics)):
-                if len(overlaps) > 0:
-                    storf_total_overlaps = len(overlaps)
-                    storf_ave_overlap = sum(overlaps)/storf_total_overlaps
-                else:
-                    storf_ave_overlap = 0
-                    storf_total_overlaps = 0
-                con_storf_metrics[i].append([gc_perc[i], lengths[i], storf_ave_overlap, storf_total_overlaps]) 
-            for storf_metrics in con_storf_metrics:
-                for metric in storf_metrics:
-                    all_storf_metrics.append(metric)
-            con_group = [(s, storf)]  # start finding new contig-group
-        else:
-            con_group.append((s, storf))
+        gc_perc = gc_metric(group)
+        lengths = [len(s[1]) for s in group]
+        overlaps = get_overlaps(group)  # list of (1 to 1/Many)
+        storf_ave_overlap = sum(overlaps)/len(overlaps) if len(overlaps) != 0 else 0
+        group_metrics = [[] for i in group]
+        for i in range(0, len(group_metrics)):
+            if len(overlaps) > 0:
+                storf_total_overlaps = len(overlaps)
+                storf_ave_overlap = sum(overlaps)/storf_total_overlaps
+            else:
+                storf_ave_overlap = 0
+                storf_total_overlaps = 0
+            group_metrics[i].append([gc_perc[i], lengths[i], storf_ave_overlap, storf_total_overlaps]) 
+        for storf_metrics in group_metrics:
+            for metric in storf_metrics:
+                all_storf_metrics.append(metric)
     data = pd.DataFrame(all_storf_metrics)
     #for storf_metric in data.columns:  # normalise the values
     #    data[storf_metric] = data[storf_metric] / data[storf_metric].max()
@@ -320,9 +322,8 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
     graph_path = ABSPATH + f"/metrics/output/cumulative_pca" if summary else ABSPATH + f"/metrics/output/{genome_name}/pca"
 
     original_data = data.copy()
-    for storf_metric in data.columns[0:len(data.columns)-2]:  # normalise the values, excluding set_type column
-        #if isinstance(storf_metric, str):
-        #    continue
+    for storf_metric in data.columns[0:len(data.columns)-2]:  
+        # normalise the values, excluding set_type column
         data[storf_metric] = data[storf_metric] / data[storf_metric].max()
 
     pca_2d_perm = list(combinations(data.columns, 2))
@@ -343,9 +344,9 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
         if pc1 == "set_type" or pc2 == "set_type":
             ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
         else:
-            ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette)
-        if not summary:
-            ax.set(ylabel=f'normalised {pc1} (max:{original_data[pc1].max()})')
+            ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.5)
+            ax.set(xlabel=f'normalised {pc2} (max:{original_data[pc2].max()})')
+        ax.set(ylabel=f'normalised {pc1} (max:{original_data[pc1].max()})')
         ax.set_title(title)
         plt.savefig(graph_path + f"/{genome_name}_{pc2}_{pc1}_pca.png")
         plt.close()
@@ -355,7 +356,7 @@ def set_dataframe_group_identities(hss_data: list, group_identities: list) -> No
     hss_data['set_type'] = 'N.a'
     for group_id, locus in enumerate(group_identities):
         start = locus[0]
-        stop = locus[1]
+        stop = locus[1] + 1
         for i in range(start, stop):
             hss_data.at[i, 'set_type'] = f"HSS_{group_id+1}"
 
@@ -377,7 +378,8 @@ def get_hss_in_storfs(storfs: list, hss: list, group_locus: list) -> list:
 def metric_one_genome() -> None:
     unfiltered_storfs = read_unfiltered(OPTIONS.unfilt)
     filt = read_filtered(OPTIONS.filt)
-    uf_group_identities, uf_hss = get_hss(OPTIONS.blastx, unfiltered_storfs)
+    blastx_matches = read_blastx(OPTIONS.blastx)
+    uf_group_identities, uf_hss = get_hss(unfiltered_storfs, blastx_matches)
     print(f"\t\tunfiltered StORFs: {len(unfiltered_storfs)}")
     print(f"\t\tfiltered StORFs: {len(filt)}\n")
     print(f"\t\tHSS in unfiltered output: {len(uf_hss)}\n")
@@ -392,21 +394,6 @@ def metric_one_genome() -> None:
 
 
 def metrics() -> None:
-    # N.b. see ../Genomes/x/x_metrics.csv for full x genome metrics
-    unfiltered_ur = [
-    "bascillus_no_filt.fasta",
-    "E-coli_no_filt.fasta",
-    "caul_no_filt.fasta",
-    "staph_no_filt.fasta",
-    "myco_no_filt.fasta"
-    ]
-    kpip_output = [
-        "bascillus_output.fasta",
-        "E-coli_output.fasta",
-        "caul_output.fasta",
-        "staph_output.fasta",
-        "myco_output.fasta"
-    ]
     # for manual file simple metric
     if OPTIONS.unfilt is not None:
         metric_one_genome()
@@ -416,23 +403,24 @@ def metrics() -> None:
     # list of each genome containing a list of each HSS group
     genomes_hss_group_size = [[0 for i in range(0,4)] for i in range(0,5)]
     genomes_filtered_hss_group_size = [[0 for i in range(0,4)] for i in range(0,5)]
-    total_unfiltered = [[] for i in range(0,len(unfiltered_ur))]
-    total_hss = [[] for i in range(0,len(unfiltered_ur))]
+    total_unfiltered = [[] for i in range(0,len(UNFILTERED_UR))]
+    total_hss = [[] for i in range(0,len(UNFILTERED_UR))]
     # For each genome, produce metrics
-    for i in range(0, len(unfiltered_ur)):
-        genome_name = unfiltered_ur[i][:unfiltered_ur[i].find("_")]
+    for i in range(0, len(UNFILTERED_UR)):
+        genome_name = UNFILTERED_UR[i][:UNFILTERED_UR[i].find("_")]
         print(f"\nProcessing {genome_name} UR...")
-        unfiltered_storfs = read_unfiltered(unfiltered_ur[i])
+        unfiltered_storfs = read_unfiltered(UNFILTERED_UR[i])
         total_unfiltered += unfiltered_storfs
         # High Significance StORF groups and their index location for DataFrame referencing
-        hss_group_identities, hss = get_hss(genome_name, unfiltered_storfs)
+        blastx_matches = read_blastx(BLASTX_FILES[i])
+        hss_group_identities, hss = get_hss(unfiltered_storfs, blastx_matches)
         print(f"\tMetricising {len(unfiltered_storfs)} unfiltered StORFs & {len(hss)} HSS")
         total_hss += hss
         for group_id, locus in enumerate(hss_group_identities):
             start = locus[0]
             stop = locus[1]  if locus[0] != 0 else locus[1] + 1
             genomes_hss_group_size[i][group_id] += stop - start
-            filtered_storfs = read_filtered(kpip_output[i])
+            filtered_storfs = read_filtered(KPIP_OUTPUT[i])
             for hs_storf in hss[start:stop]:
                 # get number of HSS_x that are in the filtered output
                 for storf in filtered_storfs:
@@ -447,17 +435,15 @@ def metrics() -> None:
         hss_data = get_metrics_dataframe(hss)
         set_dataframe_group_identities(hss_data, hss_group_identities)
         uf_hss_data = pd.concat([uf_data, hss_data])
+        genomes_dataframe = pd.concat([genomes_dataframe, uf_hss_data])
         plot_pca(uf_hss_data, genome_name)
         print("\t\tPlotting StORF lengths ECDF...")
         plot_ecdf([len(s[1]) for s in unfiltered_storfs], genome_name, "All StORF lengths")
         print("\t\tPlotting HSS lengths ECDF...")
         plot_ecdf([len(s[1]) for s in hss], genome_name, "HSS lengths")
-        genomes_dataframe = pd.concat([genomes_dataframe, uf_hss_data])
-        #print(genomes_dataframe[genomes_dataframe.columns[1]].values)
-    genomes_dataframe = pd.DataFrame(genomes_dataframe)
     plot_pca(genomes_dataframe, "all")
     total_filtered = []
-    for file_name in kpip_output:
+    for file_name in KPIP_OUTPUT:
         total_filtered += read_filtered(file_name)
     write_csv_summary(genomes_dataframe, total_unfiltered, total_filtered, genomes_hss_group_size, genomes_filtered_hss_group_size)
 
