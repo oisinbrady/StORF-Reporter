@@ -411,6 +411,13 @@ def get_con_groups(storfs: list) -> list:
 
 
 def set_filters(storfs) -> None:
+    if OPTIONS.original_filter:
+        # original filter parameters of StORF_finder.py
+        FILTERS['min_olap'] = 0
+        FILTERS['max_olap'] = 50
+        FILTERS['min_orf'] = 100
+        FILTERS['max_orf'] = 50000
+        return None
     FILTERS['plateau_value'] = get_len_ecdf_plateau(storfs) if OPTIONS.len_ecdf else None
     FILTERS['min_olap'] = 0 if OPTIONS.min_olap is None else OPTIONS.min_olap
     FILTERS['max_olap'] = 50 if OPTIONS.max_olap is None else OPTIONS.max_olap
@@ -516,6 +523,7 @@ def init_argparse():
                         help='Default - infinity (No capacity)')
 
     parser.add_argument('-d_gc', action="store_true", dest='disable_gc')
+    parser.add_argument('-original_filter', action="store_true", dest='original_filter')
     # TODO add usage of these
     # disable certain filtering 
     parser.add_argument('-d_olap', action="store_true", dest='disable_olap')
