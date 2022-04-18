@@ -35,10 +35,10 @@ KPIP_OUTPUT = [
 ]
 BLASTX_FILES = [
     "metrics/input/blastx/output/bascillus_no_filt.out",
-    "metrics/input/blastx/output/caul_no_filt.out",
     "metrics/input/blastx/output/E-coli_no_filt.out",
+    "metrics/input/blastx/output/caul_no_filt.out",
+    "metrics/input/blastx/output/staph_no_filt.out",
     "metrics/input/blastx/output/myco_no_filt.out",
-    "metrics/input/blastx/output/staph_no_filt.out"
 ]
 
 
@@ -97,12 +97,9 @@ def get_hss(unfiltered_storfs: list, blastx_matches: list) -> list[list, list]:
     # https://www.biostars.org/p/187230/
     print("\t\tFiltering duplicate & fully-embedded StORFs")
     high_bitscore_bms = remove_embedded_storfs(remove_repeat_storfs([m for m in blastx_matches if float(m[11]) >= 50]))
-    medium_bitscore_bms = remove_embedded_storfs(
-        remove_repeat_storfs([m for m in blastx_matches if 40 <= float(m[11]) < 50]))
-    high_evalue_bms = remove_embedded_storfs(
-        remove_repeat_storfs([m for m in blastx_matches if float(m[10]) < float("1e-50")]))
-    medium_evalue_bms = remove_embedded_storfs(
-        remove_repeat_storfs([m for m in blastx_matches if float("1e-50") < float(m[10]) < 0.01]))
+    medium_bitscore_bms = remove_embedded_storfs(remove_repeat_storfs([m for m in blastx_matches if 40 <= float(m[11]) < 50]))
+    high_evalue_bms = remove_embedded_storfs(remove_repeat_storfs([m for m in blastx_matches if float(m[10]) < float("1e-50")]))
+    medium_evalue_bms = remove_embedded_storfs(remove_repeat_storfs([m for m in blastx_matches if float("1e-50") < float(m[10]) < 0.01]))
     # TODO pident groups
     h_evalue_h_bitscore = [s for s in high_evalue_bms if s in high_bitscore_bms]  # HSS group 1
     h_evalue_m_bitscore = [s for s in high_evalue_bms if s in medium_bitscore_bms]  # " " 2
@@ -343,7 +340,7 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
         if pc1 == "set_type" or pc2 == "set_type":
             ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
         else:
-            ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.5)
+            ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
             ax.set(xlabel=f'normalised {pc2} (max:{original_data[pc2].max()})')
         ax.set(ylabel=f'normalised {pc1} (max:{original_data[pc1].max()})')
         ax.set_title(title)
@@ -405,7 +402,7 @@ def metrics() -> None:
     total_hss = [[] for i in range(0, len(UNFILTERED_UR))]
     # For each genome, produce metrics
     for i in range(0, len(UNFILTERED_UR)):
-        genome_name = UNFILTERED_UR[i][:UNFILTERED_UR[i].find("_")]
+        genome_name = UNFILTERED_UR[i][UNFILTERED_UR[i].find("/")+1:UNFILTERED_UR[i].find("_")]
         print(f"\nProcessing {genome_name} UR...")
         unfiltered_storfs = read_unfiltered(UNFILTERED_UR[i])
         total_unfiltered += unfiltered_storfs
