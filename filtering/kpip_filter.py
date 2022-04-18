@@ -44,22 +44,6 @@ def get_start_stop_bases(storf: list) -> tuple[str, str]:
     return start_codon, stop_codon
 
 
-def get_mode_stop_codon(storfs: list) -> list:
-    stop_codons = ["TAA", "TAG", "TGA"]
-    # get combinations of start, stop codons in StORF
-    stp_perm = product(stop_codons, repeat=2)
-    codon_delimit_count = dict()
-    for perm in stp_perm:
-        codon_delimit_count[perm] = 0
-    for storf in storfs:
-        # count the stop-start codon pair
-        start_codon, stop_codon = get_start_stop_bases(storf)
-        codon_id = (start_codon, stop_codon)
-        codon_delimit_count[codon_id] += 1
-    # return most abundant codon pair
-    return max(codon_delimit_count, key=codon_delimit_count.get)
-
-
 def get_storf_loc(storf: list) -> tuple[int, int]:
     """
     The stop and start location of a StORF relative to the unannotated genome
