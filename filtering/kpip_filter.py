@@ -8,7 +8,8 @@ from itertools import product
 from math import ceil, floor
 from typing import Union
 
-from kpip_constants import HSS_P, GC_LB_P, GC_UB_P, MIN_NORM_SIZE, ARB_MAX_STORF_SIZE, OLAP_SIZE_LB_P, ARB_MAX_OLAP_SIZE
+from kpip_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
+
 
 # set by argparse at run-time
 FILTERS = {
@@ -262,9 +263,8 @@ def ip_set_value_by_bounds(storf_contig_values: list, contig_group: list) -> lis
         storf_contig_values = filter_by_overlap(storf_contig_values, contig_group)
     if not OPTIONS.disable_size_filter:
         storf_contig_values = filter_by_size_range(storf_contig_values, contig_group)
-    if not OPTIONS.disable_gc:
-        if FILTERS.get('min_gc') is not None or FILTERS.get('max_gc') is not None:
-            storf_contig_values = filter_by_gc_range(storf_contig_values, contig_group)
+    if not OPTIONS.disable_gc and not OPTIONS.original_filter:
+        storf_contig_values = filter_by_gc_range(storf_contig_values, contig_group)
     if FILTERS.get('stop_codons') is not None:
         storf_contig_values = filter_by_stop_codons(storf_contig_values, contig_group)
     return storf_contig_values
@@ -378,7 +378,7 @@ def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
     # I.e, of all StORFs in file to be selected
     if OPTIONS.total_cap == -1:
         # average HSS percentage is ~7.4% per test genomes
-        tc = round(len(ip_vars) * HSS_P)
+        tc = round(len(ip_vars) * STORF_CAP_PERCENTAGE)
     else:
         tc = OPTIONS.total_cap  # total selected StORF constraint
     g = [(i, 1) for i in ip_vars]
@@ -412,40 +412,9 @@ def get_con_groups(storfs: list) -> list:
     return con_groups
 
 
-def get_max_overlap_size(storfs) -> int:
-    # TODO DEBUG returned value is not exactly the same as PCA plots 
-    # TODO (e.g. off by ~20 nt for E-coli)...
-    contigs = get_con_groups(storfs)
-    largest_overlap_size = 0
-    for contig in contigs:
-        # for each StORF, determine its overlaps
-        for i in range(0,len(contig)-1):
-            overlaps = []
-            start_i, stop_i = get_storf_loc(contig[i])
-            for j in range(i+1, len(contig)-1):
-                start_j, stop_j = get_storf_loc(contig[j])
-                if start_j >= stop_i or stop_j <= start_i:
-                    # iff no overlap b/w pair
-                    continue
-                elif start_j >= start_i and stop_j <= stop_i:
-                    # iif StORF j fully embedded in i
-                    continue
-                else:  # +1 needed for stop codon
-                    overlap = stop_i - start_j + 1 if start_i <= start_j else stop_j - start_i + 1
-                    overlaps.append(overlap)
-            if len(overlaps) == 0:
-                ave_overlap_size = 0
-            else:
-                ave_overlap_size = sum(overlaps)/len(overlaps)
-            if ave_overlap_size > largest_overlap_size:
-                largest_overlap_size = ave_overlap_size
-    return largest_overlap_size
-
-
 def set_overlap_bounds(storfs) -> None:
     if FILTERS.get("min_olap") is None:
-        max_overlap_size = get_max_overlap_size(storfs)
-        FILTERS["min_olap"] = OLAP_SIZE_LB_P * max_overlap_size
+        FILTERS["min_olap"] = OLAP_LB
     if FILTERS.get("max_olap") is None:
         FILTERS["max_olap"] = ARB_MAX_OLAP_SIZE
     if FILTERS.get("max_olap") < FILTERS.get("min_olap"):
@@ -454,23 +423,17 @@ def set_overlap_bounds(storfs) -> None:
 
 def set_orf_bounds(storfs) -> None:
     if FILTERS.get("min_orf") is None:
-        len_sorted_storfs = sorted(storfs, key=lambda s: len(s[1]))
-        longest_storf = len(len_sorted_storfs[len(storfs) - 1][1])
         # size based of cumulative distribution PCA size vs gc-content scatterplot
-        FILTERS['min_orf'] = round(longest_storf * MIN_NORM_SIZE)
+        FILTERS['min_orf'] = SIZE_LB
     if FILTERS.get("max_orf") is None:
         FILTERS['max_orf'] = ARB_MAX_STORF_SIZE
 
 
 def set_gc_bounds(storfs) -> None:
-    sorted_storfs = sorted(storfs, key=lambda s: len(re.findall('[GC]', s[1])) / len(s[1]))
-    d1, d2 = propability_distribution(sorted_storfs, [GC_LB_P, GC_UB_P])
-    d1_storf_gc = len(re.findall('[GC]', d1[1])) / len(d1[1])
-    d2_storf_gc = len(re.findall('[GC]', d2[1])) / len(d2[1])
     if FILTERS.get('min_gc') is None:
-        FILTERS['min_gc'] = d1_storf_gc
+        FILTERS['min_gc'] = GC_LB
     if FILTERS.get('max_gc') is None:
-        FILTERS['max_gc'] = d2_storf_gc
+        FILTERS['max_gc'] = GC_UB
 
 
 def def_user_filter_args(storfs):
@@ -493,6 +456,16 @@ def def_user_filter_args(storfs):
         FILTERS['stop_codons'] = OPTIONS.stop_codons
 
 
+def print_all_filter_params(storfs: list) -> None:
+    print(FILTERS)
+    if OPTIONS.total_cap == -1:
+        print(f"Total weight capacity: {round(len(storfs) * STORF_CAP_PERCENTAGE)}")
+    else:
+        print(f"Total weight capacity: {OPTIONS.total_cap}")
+    print(f"Contig weight capacity: {OPTIONS.contig_cap if OPTIONS.contig_cap > 0 else 'None'}")
+    exit()
+
+
 def set_filters(storfs) -> None:
     if OPTIONS.original_filter:
         # original filter parameters of StORF_finder.py
@@ -502,14 +475,14 @@ def set_filters(storfs) -> None:
         FILTERS['max_orf'] = 50000
         OPTIONS.disable_ecdf_relaxation = True
         OPTIONS.total_cap = len(storfs)
+        if OPTIONS.print_filter_params:
+            print_all_filter_params(storfs)
         return None
+    # TODO REFACTOR set according to constants which are based of cumulative PCAs
     def_user_filter_args(storfs)
     FILTERS['plateau_value'] = get_len_ecdf_plateau(storfs) if not OPTIONS.disable_ecdf_relaxation else None
     if OPTIONS.print_filter_params:
-        print(FILTERS)
-        print(f"Total weight capacity: {round(len(storfs) * HSS_P)}")
-        print(f"Contig weight capacity: {OPTIONS.contig_cap if OPTIONS.contig_cap > 0 else 'None'}")
-        exit()
+        print_all_filter_params(storfs)
 
 
 def ip_process_output(prob: pulp.LpProblem, storfs: list) -> list:
@@ -580,18 +553,20 @@ def init_argparse():
                         help='Maximum gc percentage of StORFs as float')
     parser.add_argument('-codons', action="store", dest='stop_codons', default="TAG,TGA,TAA",
                         help='Default - (\'TAG,TGA,TAA\'): List Stop Codons to use')
-    parser.add_argument('-e', action="store_true", dest='len_ecdf',
-                        help='Relax filtering for the largest StORFs (using ECDF)')
     parser.add_argument('-ip_l', action="store_true", dest='len_weighted_value',
                         help='Let IP favour StORF selection by size')
     parser.add_argument('-ip_gc', action="store_true", dest='gc_weighted_value',
                         help='Let IP favour StORF selection by gc content'),
     parser.add_argument('-ip_gc_l', action="store_true", dest='len_gc_weighted_value',
                         help='Let IP favour StORF length * GC percentage'),
+
+    # TODO CHANGE HELP STRING FOR DEFAULTS
     parser.add_argument('-cap', action="store", dest='total_cap', type=int, default=-1,
                         help='Default - infinity/No capacity: set IP maximum StORF selection capacity')
     parser.add_argument('-con_cap', action="store", dest='contig_cap', type=int, default=-1,
                         help='Default - infinity/No capacity set IP maximum StORF selection capcity within a contiguous group')
+
+
     parser.add_argument('-d_gc', action="store_true", dest='disable_gc',
                         help='Disable filtering by GC content')
     parser.add_argument('-d_olap', action="store_true", dest='disable_olap',
@@ -604,6 +579,8 @@ def init_argparse():
                         help='Set all filtering parameters equal to StORF_finder.py')
     parser.add_argument('-print_params', action="store_true", dest='print_filter_params',
                         help='Print all filters after pre-calculations')
+
+    # TODO ADD post filter "twin" StORF removal with blastx
     global OPTIONS
     OPTIONS = parser.parse_args()
 
