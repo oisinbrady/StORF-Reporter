@@ -371,20 +371,6 @@ def set_dataframe_group_identities(hss_data: list, group_identities: list) -> No
             hss_data.at[i, 'set_type'] = f"HSS_{group_id + 1}"
 
 
-def get_hss_in_storfs(storfs: list, hss: list, group_locus: list) -> list:
-    # TODO seriously need a refactor if i need a function like this...
-    hss_groups = [[] for i in range(0, 4)]  # for the 4 hss categories
-    for g, group in enumerate(group_locus):
-        start = group[0]
-        stop = group[1]
-        for hss_storf in hss[start:stop]:
-            for storf in storfs:
-                if hss_storf[0] == storf[0]:
-                    hss_groups[g].append(storf)
-                    break
-    return hss_groups
-
-
 def print_hss_group_info(hss_groups) -> None:
     print_str = []
     print_str.append(f"\tHSS_1: {len(hss_groups.get('HSS_1'))}\n")
