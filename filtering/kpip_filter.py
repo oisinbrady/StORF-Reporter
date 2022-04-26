@@ -263,8 +263,9 @@ def ip_set_value_by_bounds(storf_contig_values: list, contig_group: list) -> lis
         storf_contig_values = filter_by_overlap(storf_contig_values, contig_group)
     if not OPTIONS.disable_size_filter:
         storf_contig_values = filter_by_size_range(storf_contig_values, contig_group)
-    if not OPTIONS.disable_gc and not OPTIONS.original_filter:
-        storf_contig_values = filter_by_gc_range(storf_contig_values, contig_group)
+    if not OPTIONS.disable_gc:
+        if not OPTIONS.original_filter:
+            storf_contig_values = filter_by_gc_range(storf_contig_values, contig_group)
     if FILTERS.get('stop_codons') is not None:
         storf_contig_values = filter_by_stop_codons(storf_contig_values, contig_group)
     return storf_contig_values

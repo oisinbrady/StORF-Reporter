@@ -302,7 +302,8 @@ def plot_ecdf(data: list, genome_name: str, x_title: str) -> None:
     else:    
         graph_path = ABSPATH + f"/metrics/output/{genome_name}/ecdf"
     g = sns.displot(data=data, kind="ecdf")
-    g.set_axis_labels(f"{x_title} (max: {max(data)})", "Proportion")
+    g.set_axis_labels(f"{x_title} (max: {max(data)} nt.)", "Proportion")
+    plt.subplots_adjust(bottom=0.15)
     print(f"\t\twriting to: metrics/output/{genome_name}/ecdf/{file_name.lower()}_ecdf.png")
     g.figure.savefig(graph_path + f"/{file_name.lower()}_ecdf.png")
     plt.close()
@@ -314,6 +315,20 @@ def normalise_dataframe(data_frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.Data
         # normalise the values, excluding set_type column
         data_frame[storf_metric] = data_frame[storf_metric] / data_frame[storf_metric].max()
     return original_data, data_frame
+
+
+def get_plot_axis_units(data_frame: pd.DataFrame, pc1: str, pc2: str) -> tuple[str, str]:
+    y_max = ""
+    if pc1 == "gc_percentage":
+        y_max = f"(max: {int(data_frame[pc1].max() * 100)}%)"
+    elif pc1 == "size" or pc1 == "average_overlap_size":
+        y_max = f"(max: {int(data_frame[pc1].max())} nucleotides)"
+    x_max = ""
+    if pc2 == "gc_percentage":
+        x_max = f"(max: {int(data_frame[pc2].max() * 100)}%)"
+    elif pc2 == "size" or pc2 == "average_overlap_size":
+        x_max = f"(max: {int(data_frame[pc2].max())} nucleotides)"
+    return x_max, y_max
 
 
 def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
@@ -329,20 +344,20 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
         pc1 = perm[0]
         pc2 = perm[1]
         print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
-        palette = {
-            "unfiltered StORFs": "tab:grey",
-            "HSS_1": "tab:blue",
-            "HSS_2": "tab:green",
-            "HSS_3": "tab:orange",
-            "HSS_4": "tab:red"
-        }
+        palette = { "non-CDS StORFs": "tab:grey", "HSS_1": "tab:blue", "HSS_2": "tab:green"}
+        x_max, y_max = get_plot_axis_units(original_data, pc1, pc2)
         if pc1 == "set_type" or pc2 == "set_type":
             ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
+            ax.set(xlabel=f'{pc2.replace("_", " ")}')
         else:
             ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
-            ax.set(xlabel=f'{pc2.replace("_", " ")} (max:{original_data[pc2].max()})')
-        ax.set(ylabel=f'{pc1.replace("_", " ")} (max:{original_data[pc1].max()})')
-        #ax.set_title(title)
+            ax.set(xlabel=f'{pc2.replace("_", " ")} {x_max}')
+            plt.legend(title='StORF type', labels=['Non-CDS StORFs', 'HSS 1', 'HSS 2'])
+            leg = ax.get_legend()
+            leg.legendHandles[0].set_color('tab:grey')
+            leg.legendHandles[1].set_color('tab:blue')
+            leg.legendHandles[2].set_color('tab:green')
+        ax.set(ylabel=f'proportional {pc1.replace("_", " ")} {y_max}')
         plt.savefig(graph_path + f"/{genome_name}_{pc2}_{pc1}_pca.png")
         plt.close()
 
@@ -414,7 +429,7 @@ def metrics() -> None:
         print(f"\tMetricising {len(unfiltered_storfs)} unfiltered StORFs & {len(hss_sequences)} HSS")
         unfiltered_storfs = [s for s in unfiltered_storfs if s not in hss_sequences]
         uf_data = get_metrics_dataframe(unfiltered_storfs)
-        uf_data["set_type"] = "unfiltered StORFs"
+        uf_data["set_type"] = "non-CDS StORFs"
         hss_1_data = get_metrics_dataframe(hss_group_sequences.get("HSS_1"))
         hss_1_data["set_type"] = "HSS_1"
         hss_2_data = get_metrics_dataframe(hss_group_sequences.get("HSS_2"))
@@ -434,7 +449,12 @@ def metrics() -> None:
         plot_ecdf([len(s[1]) for s in hss_sequences], genome_name, "HSS lengths")
     # plot cumulative PCA of all test genomes
     plot_pca(cumulative_dataframe, "all")
-    plot_ecdf([len(s[1]) for s in all_unfiltered], "all", "Cumulative StORF Size")
+    plot_ecdf([len(s[1]) for s in all_unfiltered], "all", "Cumulative StORF lengths")
+    all_hss_seq = []
+    for genome in all_hss_groups:
+        for hss_group in genome:
+            all_hss_seq.extend(genome[f'{hss_group}'])
+    plot_ecdf([len(s[1]) for s in all_hss_seq], "all", "Cumulative HSS lengths")
     all_filtered = []
 
     output_type = None
