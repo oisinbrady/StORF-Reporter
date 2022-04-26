@@ -13,36 +13,11 @@ import random as rand
 import argparse
 
 from kpip_filter import get_con_groups
+from metrics_files import UNFILTERED_UR, KPIP_ORIGINAL_OUTPUT, KPIP_DEFAULT_OUTPUT, BLASTX_FILES
 
 ABSPATH = os.path.abspath(__file__)
 ABSPATH = os.path.dirname(ABSPATH)  # absolute path to working directory
 OPTIONS = None  # argparse run-time commands
-
-# N.b. see ../Genomes/x/x_metrics.csv for full x genome metrics
-UNFILTERED_UR = [
-    "input/bascillus_no_filt.fasta",
-    "input/E-coli_no_filt.fasta",
-    "input/caul_no_filt.fasta",
-    "input/staph_no_filt.fasta",
-    "input/myco_no_filt.fasta",
-    "input/pseudo_no_filt.fasta",
-]
-KPIP_OUTPUT = [
-    "kpip_output/bascillus_output.fasta",
-    "kpip_output/E-coli_output.fasta",
-    "kpip_output/caul_output.fasta",
-    "kpip_output/staph_output.fasta",
-    "kpip_output/myco_output.fasta",
-    "kpip_output/pseudo_output.fasta",
-]
-BLASTX_FILES = [
-    "metrics/input/blastx/blastx_output/bascillus_no_filt.out",
-    "metrics/input/blastx/blastx_output/E-coli_no_filt.out",
-    "metrics/input/blastx/blastx_output/caul_no_filt.out",
-    "metrics/input/blastx/blastx_output/staph_no_filt.out",
-    "metrics/input/blastx/blastx_output/myco_no_filt.out",
-    "metrics/input/blastx/blastx_output/pseudo_no_filt.out",
-]
 
 
 def read_unfiltered(file_path: str) -> list:
@@ -220,8 +195,8 @@ def codon_metric(storfs: list, genome_name: str, hss=False):
     return
 
 
-def write_csv_summary(cumulative: pd.DataFrame, filtered: list, unfiltered: list, all_hss_groups: list) -> None:
-    file_path = ABSPATH + f"/metrics/output/summary_metrics.csv"
+def write_csv_summary(cumulative: pd.DataFrame, filtered: list, unfiltered: list, all_hss_groups: list, filt_type: str) -> None:
+    file_path = ABSPATH + f"/metrics/output/{filt_type}_summary_metrics.csv"
     header = [
         "mean StORF size(normalised)", "mean overlap size(normalised)", "unfiltered StORFs",
         "filtered StORFs", "total unfiltered HSS", "total filtered HSS", "total HSS lost",
@@ -328,8 +303,8 @@ def plot_ecdf(data: list, genome_name: str, x_title: str) -> None:
         graph_path = ABSPATH + f"/metrics/output/{genome_name}/ecdf"
     g = sns.displot(data=data, kind="ecdf")
     g.set_axis_labels(f"{x_title} (max: {max(data)})", "Proportion")
-    print(f"\t\twriting to: /metrics/output/{genome_name}/ecdf/{file_name.lower()}ecdf.png")
-    g.figure.savefig(graph_path + f"/{file_name.lower()}ecdf.png")
+    print(f"\t\twriting to: metrics/output/{genome_name}/ecdf/{file_name.lower()}_ecdf.png")
+    g.figure.savefig(graph_path + f"/{file_name.lower()}_ecdf.png")
     plt.close()
 
 
@@ -354,7 +329,6 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
         pc1 = perm[0]
         pc2 = perm[1]
         print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
-        #title = f"All Genomes: {pc2}_{pc1} PCA" if summary else f"{genome_name}: {pc2}_{pc1} PCA"
         palette = {
             "unfiltered StORFs": "tab:grey",
             "HSS_1": "tab:blue",
@@ -427,7 +401,7 @@ def metrics() -> None:
     cumulative_dataframe = pd.DataFrame()
     # list of each genome containing a list of each HSS group
     all_hss_groups = [{"HSS_1": None, "HSS_2": None} for i in range(0, len(UNFILTERED_UR))]
-    all_unfiltered = [[] for i in range(0, len(UNFILTERED_UR))]
+    all_unfiltered = []
     # For each genome, produce metrics
     for i in range(0, len(UNFILTERED_UR)):
         genome_name = UNFILTERED_UR[i][UNFILTERED_UR[i].find("/")+1:UNFILTERED_UR[i].find("_")]
@@ -460,14 +434,22 @@ def metrics() -> None:
         plot_ecdf([len(s[1]) for s in hss_sequences], genome_name, "HSS lengths")
     # plot cumulative PCA of all test genomes
     plot_pca(cumulative_dataframe, "all")
-    plot_ecdf([len(s[1]) for s in all_unfiltered], "all", "Cumulative StORF Size ECDF")
+    plot_ecdf([len(s[1]) for s in all_unfiltered], "all", "Cumulative StORF Size")
     all_filtered = []
-    for file_name in KPIP_OUTPUT:
+
+    output_type = None
+    if OPTIONS.type == "default":
+        output_type = KPIP_DEFAULT_OUTPUT
+    elif OPTIONS.type == "original":
+        output_type = KPIP_ORIGINAL_OUTPUT
+    for file_name in output_type:
         all_filtered += read_filtered(file_name)
     write_csv_summary(cumulative_dataframe, 
                       all_filtered, 
                       all_unfiltered, 
-                      all_hss_groups)
+                      all_hss_groups,
+                      OPTIONS.type
+                      )
 
 
 def init_argparse() -> None:
@@ -476,6 +458,8 @@ def init_argparse() -> None:
     parser.add_argument('-unfiltered', action="store", dest='unfilt', help='Input FASTA File')
     parser.add_argument('-blastx', action="store", dest='blastx', required=False,
                         help='Input FASTA File')
+    parser.add_argument('-type', action="store", dest='type', required=False, default="default",
+                        help='Default: "default" (new filters). The type of filtering used e.g. original (StORF_finder.py), default, etc.')
     global OPTIONS
     OPTIONS = parser.parse_args()
     if OPTIONS.filt is not None or OPTIONS.unfilt is not None or OPTIONS.blastx is not None:
