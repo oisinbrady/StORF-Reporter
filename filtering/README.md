@@ -1,4 +1,4 @@
-KPIP_filter
+storf_filter.py
 ===============
 Filter UR StORFs
 
