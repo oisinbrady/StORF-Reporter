@@ -8,7 +8,7 @@ from itertools import product
 from math import ceil, floor
 from typing import Union
 
-from kpip_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
+from kpip_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, OLAP_UB
 
 
 # set by argparse at run-time
@@ -72,11 +72,12 @@ def rate_of_change(percentile_bound: tuple[float, float], storfs: list) -> float
     ub_index = ceil(ub * len(storfs))
     delta_x = len(storfs[ub_index][1]) - len(storfs[lb_index][1])
     delta_y = ub - lb
-    return delta_y / delta_x  # roc for first storf len to index of 50th percentile rounded
+    return delta_y / delta_x 
 
 
 def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
     # get the StORF length (nt) at the plateau point of an ECDF distribution of StORF lengths
+    # none of the selected filtering options will apply to any StORFs greater than this size
     sorted_storfs = sorted(unfiltered_storfs, key=lambda s: len(s[1]))  # order StORFs by len
     percentile_bound = [0.0, 0.5]
     initial_m = rate_of_change(percentile_bound, sorted_storfs)
@@ -86,11 +87,12 @@ def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
         lb = percentile_bound[1]
         ub = (1 - lb) / 2 + lb
         percentile_bound = [lb, ub]  # move to the next percentile slot of StORFs
+        print(percentile_bound)
         i += 1
     # mid point of percentile bound
     mp = ((percentile_bound[1] - percentile_bound[0]) / 2) + percentile_bound[0]
     mp_index = floor(mp * len(sorted_storfs))
-    # determine max StORF length allowed for filtering
+    # determine max StORF length where filtering will be applied
     return len(sorted_storfs[mp_index][1])
 
 
@@ -206,7 +208,7 @@ def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
     :return: (list) An adjusted list of StORF values according to their length
     """
     for i, storf in enumerate(storf_group):
-        storf_group_values[i][1] *= len(re.findall('[AGCT]', storf[1][1]))
+        storf_group_values[i][1] *= len(re.findall('[AGCT]', storf[1]))
     return storf_group_values
 
 
@@ -218,7 +220,7 @@ def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
     :return: (list) An adjusted list of StORF values according to their gc-content.
     """
     for i, storf in enumerate(storf_group):
-        storf_group_values[i][1] *= len(re.findall('[GC]', storf[1][1]))
+        storf_group_values[i][1] *= len(re.findall('[GC]', storf[1]))
     return storf_group_values
 
 
@@ -237,8 +239,8 @@ def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode
 
 def filter_favour_gc_by_len(storf_group_values: list, storf_group: list) -> list:
     for i, storf in enumerate(storf_group):
-        storf_len = len(re.findall('[AGCT]', storf[1][1]))
-        storf_gc = len(re.findall('[GC]', storf[1][1]))
+        storf_len = len(re.findall('[AGCT]', storf[1]))
+        storf_gc = len(re.findall('[GC]', storf[1]))
         # based of cumulative PCA gc vs size
         gc_by_size = storf_gc / storf_len * storf_len
         storf_group_values[i][1] = gc_by_size
@@ -271,6 +273,20 @@ def ip_set_value_by_bounds(storf_contig_values: list, contig_group: list) -> lis
     return storf_contig_values
 
 
+def filter_by_bounds(storf_contig_values: list, contig_group: list) -> list:
+    # value is 0,1 iff isn't or is in the following bounds
+    if not OPTIONS.disable_olap:
+        storf_contig_values = filter_by_overlap(storf_contig_values, contig_group)
+    if not OPTIONS.disable_size_filter:
+        storf_contig_values = filter_by_size_range(storf_contig_values, contig_group)
+    if not OPTIONS.disable_gc:
+        if not OPTIONS.original_filter:
+            storf_contig_values = filter_by_gc_range(storf_contig_values, contig_group)
+    if FILTERS.get('stop_codons') is not None:
+        storf_contig_values = filter_by_stop_codons(storf_contig_values, contig_group)
+    return storf_contig_values
+
+
 def set_group_values(contig_group: list) -> list:
     """
     Adjust the coefficient value of all StORFs in group according to the user defined filters.
@@ -279,16 +295,17 @@ def set_group_values(contig_group: list) -> list:
     """
     # Default value of StORF is 1, if StORF doesn't obey restrictions then overwrite to 0
     storf_contig_values = [[s[0], 1] for s in contig_group]  # storf id and value
-    storf_contig_values = ip_set_weighted_values(storf_contig_values, contig_group)
     storf_contig_values = ip_set_value_by_bounds(storf_contig_values, contig_group)
+    storf_contig_values = ip_set_weighted_values(storf_contig_values, contig_group)
     # apply less strict filtering for sub-set S
     # S has a much higher distribution of HSS (High Significance StORFs)
     if not OPTIONS.disable_ecdf_relaxation:
-        p = FILTERS.get("plateau_value")
-        # overwrite filter result for S
-        for i in range(0, len(storf_contig_values)):
-            if len(contig_group[i][1]) >= p:
-                storf_contig_values[i][1] = 1
+        if not OPTIONS.original_filter:
+            p = FILTERS.get("plateau_value")
+            # overwrite filter result for S
+            for i in range(0, len(storf_contig_values)):
+                if len(contig_group[i][1]) >= p:
+                    storf_contig_values[i][1] = 1
     return storf_contig_values
 
 
@@ -341,31 +358,7 @@ def ip_set_obj_func(prob: pulp.LpProblem, obj_values: list, ip_vars: list) -> No
         obj_expression.append((ip_vars[obj_i], value))
         obj_i += 1
     e = pulp.LpAffineExpression(obj_expression)
-    prob += e  # add objective function (in turn, Pulp adds variable bounds)
-
-
-def ip_set_group_constraint(prob: pulp.LpProblem, ip_vars: list, group: list, group_id: int) -> None:
-    """
-    Set the knapsack GROUP capacity of selected StORFs in the unannotated genome
-    :param prob: (pulp.LpProblem) The integer program
-    :param ip_vars: (list of pulp.LpVariable) the IP variables
-    :param group: (list) A contiguous region of StORFs containing some overlap
-    :param group_id: (int) The current group's ID
-    :return: (None)
-    """
-    if OPTIONS.contig_cap == -1:
-        # iff infinity (i.e. AMAP StORFs in each group), no need for constraint
-        return
-    else:
-        # constrain group, where weight of each var = 1
-        gc = OPTIONS.contig_cap  # group constraint
-        g = []
-        for i, storf in enumerate(group):
-            g.append((ip_vars[storf[0]], 1))
-        e = pulp.LpAffineExpression(g)
-        # LHS: sum of selected StORFs in group, RHS: <= gc
-        c = pulp.LpConstraint(e, -1, f"internal_knapsack_constraint_{group_id}", gc)
-        prob += c
+    prob += e  # add objective function (in turn, Pulp adds variable bounds = [0,1])
 
 
 def ip_set_total_constraint(prob: pulp.LpProblem, ip_vars: list) -> None:
@@ -417,7 +410,7 @@ def set_overlap_bounds(storfs) -> None:
     if FILTERS.get("min_olap") is None:
         FILTERS["min_olap"] = OLAP_LB
     if FILTERS.get("max_olap") is None:
-        FILTERS["max_olap"] = ARB_MAX_OLAP_SIZE
+        FILTERS["max_olap"] = OLAP_UB
     if FILTERS.get("max_olap") < FILTERS.get("min_olap"):
         FILTERS["min_olap"] = 0
 
@@ -463,7 +456,6 @@ def print_all_filter_params(storfs: list) -> None:
         print(f"Total weight capacity: {round(len(storfs) * STORF_CAP_PERCENTAGE)}")
     else:
         print(f"Total weight capacity: {OPTIONS.total_cap}")
-    print(f"Contig weight capacity: {OPTIONS.contig_cap if OPTIONS.contig_cap > 0 else 'None'}")
     exit()
 
 
@@ -498,7 +490,26 @@ def ip_process_output(prob: pulp.LpProblem, storfs: list) -> list:
     return output
 
 
+def basic_filter(storfs: list) -> list:
+    # filter by bounds
+    selected = []  # 1=selected, 0=not-selected
+    contigs = get_con_groups(storfs)
+    for g, contig in enumerate(contigs):
+        contig_values = [[s[0], 1] for s in contig]  # default all StORFs to selected
+        selected += filter_by_bounds(contig_values, contig)
+    filtered_storfs = []
+
+    for i, storf_data in enumerate(selected):
+        is_selected = storf_data[1]
+        storf_fasta = storfs[i]  # StORF meta data and sequence
+        if is_selected:
+            filtered_storfs.append(storf_fasta)
+    return filtered_storfs
+        
+
+
 def ip_filter(storfs: list) -> list:
+    # filter by weighted values (+ optional bounds)
     """
     Filter StORFs in unannotated genome file using integer programming
     :param storfs: (list) all StORFs in unannotated genome
@@ -524,7 +535,6 @@ def ip_filter(storfs: list) -> list:
     contigs = get_con_groups(storfs)
     for g, contig in enumerate(contigs):
         obj_values += set_group_values(contig)
-        ip_set_group_constraint(prob, ip_vars, contig, g)
 
     # construct objective function (auto-adds IP variable bounds)
     ip_set_obj_func(prob, obj_values, ip_vars)
@@ -554,20 +564,21 @@ def init_argparse():
                         help='Maximum gc percentage of StORFs as float')
     parser.add_argument('-codons', action="store", dest='stop_codons', default="TAG,TGA,TAA",
                         help='Default - (\'TAG,TGA,TAA\'): List Stop Codons to use')
-    parser.add_argument('-ip_l', action="store_true", dest='len_weighted_value',
+
+
+    parser.add_argument('-ip_v_l', action="store_true", dest='len_weighted_value',
                         help='Let IP favour StORF selection by size')
-    parser.add_argument('-ip_gc', action="store_true", dest='gc_weighted_value',
+    parser.add_argument('-ip_v_gc', action="store_true", dest='gc_weighted_value',
                         help='Let IP favour StORF selection by gc content'),
-    parser.add_argument('-ip_gc_l', action="store_true", dest='len_gc_weighted_value',
+    parser.add_argument('-ip_v_gcl', action="store_true", dest='len_gc_weighted_value',
                         help='Let IP favour StORF length * GC percentage'),
 
+
+    parser.add_argument('-ip', action="store_true", dest='kpip_filter',
+                        help='filter by basic bounds for StORF attributes')
     # TODO CHANGE HELP STRING FOR DEFAULTS
     parser.add_argument('-cap', action="store", dest='total_cap', type=int, default=-1,
                         help='Default - infinity/No capacity: set IP maximum StORF selection capacity')
-    parser.add_argument('-con_cap', action="store", dest='contig_cap', type=int, default=-1,
-                        help='Default - infinity/No capacity set IP maximum StORF selection capcity within a contiguous group')
-
-
     parser.add_argument('-d_gc', action="store_true", dest='disable_gc',
                         help='Disable filtering by GC content')
     parser.add_argument('-d_olap', action="store_true", dest='disable_olap',
@@ -581,7 +592,7 @@ def init_argparse():
     parser.add_argument('-print_params', action="store_true", dest='print_filter_params',
                         help='Print all filters after pre-calculations')
 
-    # TODO ADD post filter "twin" StORF removal with blastx
+    # TODO ADD post filter "twin" StORF labelling with blastx
     global OPTIONS
     OPTIONS = parser.parse_args()
 
@@ -593,7 +604,10 @@ def main():
     init_argparse()
     storfs = read_fasta()
     set_filters(storfs)
-    storfs = ip_filter(storfs)
+    if not OPTIONS.kpip_filter:
+        storfs = basic_filter(storfs)
+    else:
+        storfs = ip_filter(storfs)
     write_fasta(storfs)
 
 

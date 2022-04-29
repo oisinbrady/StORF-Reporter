@@ -190,9 +190,18 @@ def kmer_metric(storfs: list, k: int):
     return
 
 
-def codon_metric(storfs: list, genome_name: str, hss=False):
-    # TODO
-    return
+def codon_metric(storfs: list):
+    # get the start and stop codons of each StORF in a contiguous group
+    # TODO REFACTOR
+    codons = [[],[]]
+    for storf in storfs:
+        i = storf[0].find("|End_Stop") 
+        j = storf[0].find("|StORF_Type") 
+        start_codon = storf[0][i-3:i]
+        stop_codon = storf[0][j-3:j]
+        codons[0].append(start_codon)
+        codons[1].append(stop_codon)
+    return codons
 
 
 def write_csv_summary(cumulative: pd.DataFrame, filtered: list, unfiltered: list, all_hss_groups: list, filt_type: str) -> None:
@@ -259,6 +268,7 @@ def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
     for group in con_groups:
         # get metrics for each contig StORF group
         gc_perc = gc_metric(group)
+        start_codons, stop_codons = codon_metric(group) 
         lengths = [len(s[1]) for s in group]
         overlaps = get_overlaps(group)  # list of (1 to 1/Many)
         storf_ave_overlap = sum(overlaps) / len(overlaps) if len(overlaps) != 0 else 0
@@ -270,13 +280,19 @@ def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
             else:
                 storf_ave_overlap = 0
                 storf_total_overlaps = 0
-            group_metrics[i].append([gc_perc[i], lengths[i], storf_ave_overlap, storf_total_overlaps])
+            group_metrics[i].append([gc_perc[i], 
+                                    lengths[i], 
+                                    storf_ave_overlap, 
+                                    storf_total_overlaps,
+                                    start_codons[i],
+                                    stop_codons[i]
+                                    ])
         for storf_metrics in group_metrics:
             for metric in storf_metrics:
                 all_storf_metrics.append(metric)
     data = pd.DataFrame(all_storf_metrics)
     if len(data) > 0:
-        data.columns = ["gc_percentage", "size", "average_overlap_size", "total_overlaps"]
+        data.columns = ["gc_percentage", "size", "average_overlap_size", "total_overlaps", "start_codon", "stop_codon"]
     return data
 
 
@@ -309,9 +325,13 @@ def plot_ecdf(data: list, genome_name: str, x_title: str) -> None:
     plt.close()
 
 
+def get_hss_coverage() -> list:
+    # TODO
+    return
+
 def normalise_dataframe(data_frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     original_data = data_frame.copy()
-    for storf_metric in data_frame.columns[0:len(data_frame.columns) - 2]:
+    for storf_metric in data_frame.columns[0:len(data_frame.columns) - 4]:
         # normalise the values, excluding set_type column
         data_frame[storf_metric] = data_frame[storf_metric] / data_frame[storf_metric].max()
     return original_data, data_frame
@@ -340,25 +360,48 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
     graph_path = ABSPATH + f"/metrics/output/cumulative_pca" if summary else ABSPATH + f"/metrics/output/{genome_name}/pca"
     original_data, data = normalise_dataframe(data)
     pca_2d_perm = list(combinations(data.columns, 2))
+    restrict = ["start_codon", "stop_codon"]
     for perm in pca_2d_perm:
         pc1 = perm[0]
         pc2 = perm[1]
-        print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
-        palette = { "non-CDS StORFs": "tab:grey", "HSS_1": "tab:blue", "HSS_2": "tab:green"}
+        if pc1 not in restrict and pc2 not in restrict:
+            print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
+        palette = {"non-CDS StORFs": "tab:grey", "HSS_1": "tab:blue", "HSS_2": "tab:green"}
         x_max, y_max = get_plot_axis_units(original_data, pc1, pc2)
         if pc1 == "set_type" or pc2 == "set_type":
-            ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
-            ax.set(xlabel=f'{pc2.replace("_", " ")}')
-        else:
+            if "codon" not in pc1 and "codon" not in pc2: 
+                ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
+                ax.set(xlabel=f'{pc2.replace("_", " ")}')
+        elif pc1 not in restrict and pc2 not in restrict:
             ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
             ax.set(xlabel=f'{pc2.replace("_", " ")} {x_max}')
             plt.legend(title='StORF type', labels=['Non-CDS StORFs', 'HSS 1', 'HSS 2'])
             leg = ax.get_legend()
-            leg.legendHandles[0].set_color('tab:grey')
-            leg.legendHandles[1].set_color('tab:blue')
-            leg.legendHandles[2].set_color('tab:green')
-        ax.set(ylabel=f'proportional {pc1.replace("_", " ")} {y_max}')
-        plt.savefig(graph_path + f"/{genome_name}_{pc2}_{pc1}_pca.png")
+            leg.legendHandles[0].set_color('grey') #tab:grey
+            leg.legendHandles[1].set_color('blue')
+            leg.legendHandles[2].set_color('green')
+        else:
+            if summary and pc1 in restrict and pc2 in restrict:
+                print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
+                hss_1_data = data.loc[data['set_type'] == 'HSS_1']
+                hss_2_data = data.loc[data['set_type'] == 'HSS_2']
+                non_CDS_data = data.loc[data['set_type'] == 'non-CDS StORFs']
+                count_data = [non_CDS_data, hss_1_data, hss_2_data]
+                for i, set_type in enumerate(palette):
+                    color=palette[set_type]
+                    sns.countplot(data=count_data[i], x="start_codon", color=color)
+                    plt.savefig(graph_path + f"/{set_type.replace(' ', '_')}_start_codons.png")
+                    sns.countplot(data=count_data[i], x="stop_codon", color=color)
+                    plt.savefig(graph_path + f"/{set_type.replace(' ', '_')}_stop_codons.png")
+                    plt.close()                    
+                return None
+        if y_max == "":
+            ylabel = f'{pc1.replace("_", " ")}'
+        else:
+            ylabel = f'proportional {pc1.replace("_", " ")} {y_max}'
+        ax.set(ylabel=ylabel)
+        if pc1 not in restrict and pc2 not in restrict:
+            plt.savefig(graph_path + f"/{genome_name}_{pc2}_{pc1}_pca.png")
         plt.close()
 
 
