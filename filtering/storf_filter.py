@@ -8,7 +8,7 @@ from itertools import product
 from math import ceil, floor
 from typing import Union
 
-from kpip_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, OLAP_UB
+from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, OLAP_UB
 
 
 # set by argparse at run-time
