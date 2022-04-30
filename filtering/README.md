@@ -1,4 +1,4 @@
-KPIP_filter
+storf_filter.py
 ===============
 Filter UR StORFs
 
@@ -8,7 +8,7 @@ E.g.:
 
 `python3 StORF_Finder.py -seq Genomes/E-coli/E-coli_URs.fasta -o ../testout/E-coli_output_no_filt -filt none`
 
-ur_metrics.py
+storf_analyser.py
 ===============
 Get metrics of test genomes.
 
