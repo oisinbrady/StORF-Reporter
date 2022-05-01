@@ -1,14 +1,15 @@
 import collections
-import re
-import pulp
-import argparse
+import re  # for StORF sequence identifications (e.g. GC-content)
+import pulp  # for IP modelling and solving
+import argparse  # for command line argument parsing
 import pandas as pd
+import time  # for run time measurements
 from enum import Enum
 from itertools import product
 from math import ceil, floor
 from typing import Union
 
-from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, OLAP_UB
+from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
 
 
 # set by argparse at run-time
@@ -52,6 +53,8 @@ def get_storf_loc(storf: list) -> tuple[int, int]:
     :return: (tuple(intA, intB)) intA=start location, intB=stop location
     """
     storf_x_meta = storf[0]
+    #print(storf_x_meta)
+    #exit()
     locus = storf_x_meta[storf_x_meta.find(":") + 1:storf_x_meta.find("|")]
     start = int(locus[:locus.find("-")])
     stop = int(locus[locus.find("-") + 1:])
@@ -87,7 +90,6 @@ def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
         lb = percentile_bound[1]
         ub = (1 - lb) / 2 + lb
         percentile_bound = [lb, ub]  # move to the next percentile slot of StORFs
-        print(percentile_bound)
         i += 1
     # mid point of percentile bound
     mp = ((percentile_bound[1] - percentile_bound[0]) / 2) + percentile_bound[0]
@@ -97,6 +99,8 @@ def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
 
 
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
+
+    # TODO DESCRIBE FILTER BY OVERLAP COUNT FUNCTIONALITY
     """
     Assign a coefficient value of 0 to all StORFs in group that don't satisfy the overlapping constraints.
     I.e., Get the highest valued StORF(s) obeying knapsack constraints.
@@ -120,12 +124,16 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     sorted_storfs = sorted(storf_group, key=lambda s: len(s[1]), reverse=True)
     # For each StORF, remove all smaller overlapping STORFs according to filtering rules
     length = len(sorted_storfs)
+    overlap_count = [0 for i in range(len(storf_group))]
     i = 0  # first StORF of comparison pair
     while i < length:
         start_x, stop_x = get_storf_loc(sorted_storfs[i])
         j = i + 1  # second StORF of comparison pair
+        overlaps_x = 0  # number of overlaps of StORF x
         while j < length:
             start_y, stop_y = get_storf_loc(sorted_storfs[j])
+            #print(start_x, stop_x)
+            #print(start_y, stop_y)
             if start_y >= stop_x or stop_y <= start_x:
                 # iff no overlap b/w pair
                 j += 1
@@ -134,7 +142,9 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
                 # iif StORF j fully embedded in i
                 sorted_storfs.pop(j)
                 length = len(sorted_storfs)
+                overlaps_x += 1
             else:  # +1 needed for stop codon
+                overlaps_x += 1
                 overlap = stop_x - start_y + 1 if start_x <= start_y else stop_y - start_x + 1
                 if not o_min < overlap < o_max:
                     # if j overlap is out of allowed bound
@@ -142,12 +152,16 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
                     length = len(sorted_storfs)
                 else:  # StORF j remains selected
                     j += 1
+        overlap_count[i] = overlaps_x
         length = len(sorted_storfs)
         i += 1
     selected = [i[0] for i in sorted_storfs]
-    for storf in storf_group_values:
+    for i, storf in enumerate(storf_group_values):
         if storf[0] not in selected:
             storf[1] = 0  # change coefficient value to filter out disallowed StORFs
+        if not OPTIONS.disable_olap_count:
+            if overlap_count[i] > 50:
+                storf[1] = 0
     return storf_group_values
 
 
@@ -259,20 +273,6 @@ def ip_set_weighted_values(storf_contig_values: list, contig_group: list) -> lis
     return storf_contig_values
 
 
-def ip_set_value_by_bounds(storf_contig_values: list, contig_group: list) -> list:
-    # value is 0,1 iff isn't or is in the following bounds
-    if not OPTIONS.disable_olap:
-        storf_contig_values = filter_by_overlap(storf_contig_values, contig_group)
-    if not OPTIONS.disable_size_filter:
-        storf_contig_values = filter_by_size_range(storf_contig_values, contig_group)
-    if not OPTIONS.disable_gc:
-        if not OPTIONS.original_filter:
-            storf_contig_values = filter_by_gc_range(storf_contig_values, contig_group)
-    if FILTERS.get('stop_codons') is not None:
-        storf_contig_values = filter_by_stop_codons(storf_contig_values, contig_group)
-    return storf_contig_values
-
-
 def filter_by_bounds(storf_contig_values: list, contig_group: list) -> list:
     # value is 0,1 iff isn't or is in the following bounds
     if not OPTIONS.disable_olap:
@@ -295,7 +295,7 @@ def set_group_values(contig_group: list) -> list:
     """
     # Default value of StORF is 1, if StORF doesn't obey restrictions then overwrite to 0
     storf_contig_values = [[s[0], 1] for s in contig_group]  # storf id and value
-    storf_contig_values = ip_set_value_by_bounds(storf_contig_values, contig_group)
+    storf_contig_values = filter_by_bounds(storf_contig_values, contig_group)
     storf_contig_values = ip_set_weighted_values(storf_contig_values, contig_group)
     # apply less strict filtering for sub-set S
     # S has a much higher distribution of HSS (High Significance StORFs)
@@ -326,6 +326,8 @@ def read_fasta() -> list:
     :return: (list) A list of all StORFs in fasta file input
     """
     unfiltered_storfs = []
+    #print(OPTIONS.fasta)
+    #exit()
     with open(OPTIONS.fasta) as storf_file:
         for line in storf_file:
             if line[0] == ">":
@@ -410,7 +412,7 @@ def set_overlap_bounds(storfs) -> None:
     if FILTERS.get("min_olap") is None:
         FILTERS["min_olap"] = OLAP_LB
     if FILTERS.get("max_olap") is None:
-        FILTERS["max_olap"] = OLAP_UB
+        FILTERS["max_olap"] = ARB_MAX_OLAP_SIZE
     if FILTERS.get("max_olap") < FILTERS.get("min_olap"):
         FILTERS["min_olap"] = 0
 
@@ -583,6 +585,9 @@ def init_argparse():
                         help='Disable filtering by GC content')
     parser.add_argument('-d_olap', action="store_true", dest='disable_olap',
                         help='Disable filtering by overlap size (nt)')
+    # TODO HELP DESCRIPTION
+    parser.add_argument('-d_olap_count', action="store_true", dest='disable_olap_count',
+                        help='')
     parser.add_argument('-d_size', action="store_true", dest='disable_size_filter',
                         help='Disable filtering by StORF size (nt)'),
     parser.add_argument('-d_ecdf', action="store_true", dest='disable_ecdf_relaxation',
@@ -591,6 +596,9 @@ def init_argparse():
                         help='Set all filtering parameters equal to StORF_finder.py')
     parser.add_argument('-print_params', action="store_true", dest='print_filter_params',
                         help='Print all filters after pre-calculations')
+
+    parser.add_argument('-run_time', action="store_true", dest='run_time',
+                        help='Print total program execution time')
 
     # TODO ADD post filter "twin" StORF labelling with blastx
     global OPTIONS
@@ -612,4 +620,8 @@ def main():
 
 
 if __name__ == '__main__':
+    start_time = time.time()
     main()
+    if OPTIONS.run_time:
+        print(f"{time.time() - start_time}")
+

@@ -12,7 +12,7 @@ import seaborn as sns
 import random as rand
 import argparse
 
-from kpip_filter import get_con_groups
+from storf_filter import get_con_groups
 from metrics_files import UNFILTERED_UR, KPIP_ORIGINAL_OUTPUT, KPIP_DEFAULT_OUTPUT, BLASTX_FILES
 
 ABSPATH = os.path.abspath(__file__)
@@ -70,9 +70,9 @@ def get_hss_1(blastx_matches: list) -> list:
         print("\tDetermining HSS_1 datasets...")
     bm = blastx_matches
     hss_1 = [m for m in bm 
-             if float(m[2]) >= 50  # percentage identity >= 50
-             and float(m[3]) > 100  # alignment length > 100
-             and float(m[10]) <= float("1e-50")  # e-value <= 1e-50
+             if #float(m[2]) >= 50  # percentage identity >= 50
+             #float(m[3]) > 100  # alignment length > 100
+             float(m[10]) <= float("1e-50")  # e-value <= 1e-50
              and float(m[11]) >= 50  # bit-score >= 50
             ]  
     if not OPTIONS.filt:
@@ -88,9 +88,9 @@ def get_hss_2(blastx_matches: list) -> list:
         print("\tDetermining HSS_2 datasets...")
     bm = blastx_matches
     hss_2 = [m for m in bm 
-             if 40 <= float(m[2]) < 50  # percentage identity = [30, 50)
-             and float(m[3]) > 100  # alignment length > 100
-             and float("1e-50") < float(m[10]) < 0.01  # e-value = (1e-50, 0.01)
+             if #40 <= float(m[2]) < 50  # percentage identity = [30, 50)
+             #and float(m[3]) > 100  # alignment length > 100
+             float("1e-50") < float(m[10]) < 0.01  # e-value = (1e-50, 0.01)
              and 40 <= float(m[11]) < 50  #  bit-score = [40, 50]
             ]
     if not OPTIONS.filt:
@@ -156,6 +156,7 @@ def remove_repeat_storfs(blastx_matches: list) -> list:
 
 
 def get_overlaps(con_group: list) -> list:
+    # N.b. counts fully embedded StORFs as overlaps
     overlaps = []
     for j in range(0, len(con_group) - 1):
         storf_j_id = con_group[j][0]
@@ -351,6 +352,46 @@ def get_plot_axis_units(data_frame: pd.DataFrame, pc1: str, pc2: str) -> tuple[s
     return x_max, y_max
 
 
+
+def plot_quantile_points(df: pd.DataFrame, ax: plt.Axes, metric: str) -> None:
+    # plot quantiles and whiskers values and arrows
+    set_type_quantiles = get_quantiles(df, ax, metric)
+    x_offset = 0.1  # x coordinate for label
+    for quantiles in set_type_quantiles:
+        for q in quantiles:
+            ax.annotate('%.2f' % q, (x_offset,float(q)),
+                        xytext=(x_offset, q), 
+                        textcoords='data',
+                        arrowprops=dict(facecolor='red'),
+                        color='red'
+                        )
+        x_offset += 1
+
+
+def get_quantiles(df: pd.DataFrame, ax: plt.Axes, pc: str) -> None:
+    # pc = principle component
+    storf_set_types = []
+    storf_set_types.append(df.loc[df['set_type'] == "non-CDS StORFs"]) 
+    storf_set_types.append(df.loc[df['set_type'] == "HSS_2"]) 
+    storf_set_types.append(df.loc[df['set_type'] == "HSS_1"]) 
+    set_quantiles = []
+    for set_type in storf_set_types:
+        q1 = set_type.dropna()[pc].quantile(0.25)
+        q2 = set_type.dropna()[pc].quantile(0.50)
+        q3 = set_type.dropna()[pc].quantile(0.75)
+        iqr = q3 - q1  # interquartile range
+        k = 1.5  # default for seaborn
+        lb = q1 - k * iqr  # lower bound
+        ub = q3 + k * iqr  # upper bound
+        # whisker points
+        whis_lb = min(x for x in set_type.dropna()[pc] if x >= lb)
+        whis_ub = max(x for x in set_type.dropna()[pc] if x <= ub)
+        # TODO add argparse options for which labels to add from a choice of:
+        # [whis_lb, q1, q2, q3, whis_ub]
+        set_quantiles.append([whis_lb, whis_ub])
+    return set_quantiles
+
+
 def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
     summary = genome_name == "all"
     if summary:
@@ -372,6 +413,10 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
             if "codon" not in pc1 and "codon" not in pc2: 
                 ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
                 ax.set(xlabel=f'{pc2.replace("_", " ")}')
+                if pc1 != "set_type":
+                    plot_quantile_points(data, ax, pc1) 
+                else:
+                    plot_quantile_points(data, ax, pc2) 
         elif pc1 not in restrict and pc2 not in restrict:
             ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
             ax.set(xlabel=f'{pc2.replace("_", " ")} {x_max}')
