@@ -9,7 +9,7 @@ from itertools import product
 from math import ceil, floor
 from typing import Union
 
-from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
+from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, OLAP_COUNT_UB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
 
 
 # set by argparse at run-time
@@ -18,11 +18,13 @@ FILTERS = {
     "max_orf": None,
     "min_olap": None,
     "max_olap": None,
+    "max_olap_count": None,
     "min_gc": None,
     "max_gc": None,
     "plateau_value": None,
     "stop_codons": None,
     "mode_stop_codons": None,
+    "test_disable_o_count": False,  # for unit testing
 }
 
 
@@ -99,10 +101,8 @@ def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
 
 
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
-
-    # TODO DESCRIBE FILTER BY OVERLAP COUNT FUNCTIONALITY
     """
-    Assign a coefficient value of 0 to all StORFs in group that don't satisfy the overlapping constraints.
+    Assign a value of 0 to all StORFs in group that don't satisfy the overlapping constraints.
     I.e., Get the highest valued StORF(s) obeying knapsack constraints.
     Logic is as follows:
         - Return at least one StORF of the highest value
@@ -158,10 +158,17 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     selected = [i[0] for i in sorted_storfs]
     for i, storf in enumerate(storf_group_values):
         if storf[0] not in selected:
-            storf[1] = 0  # change coefficient value to filter out disallowed StORFs
-        if not OPTIONS.disable_olap_count:
-            if overlap_count[i] > 50:
-                storf[1] = 0
+            storf[1] = 0  # change value to filter out disallowed StORFs
+        
+        # inelegant work-around for unit-testing - b/c unable to mock OPTIONS env variable
+        try:
+            if not FILTERS.get('test_disable_o_count') or not OPTIONS.disable_olap_count:
+                if overlap_count[i] > FILTERS.get("max_olap_count"):
+                    storf[1] = 0  # filter by overlap *count* (number of overlaps per StORF)
+        except NameError:  # if function called by unit test
+            if not FILTERS.get('test_disable_o_count'):
+                if overlap_count[i] > FILTERS.get("max_olap_count"):
+                    storf[1] = 0
     return storf_group_values
 
 
@@ -206,11 +213,11 @@ def filter_by_stop_codons(storf_group_values: list, storf_group: list) -> list:
     """
     allowed_codons = FILTERS.get('stop_codons')
     for i, storf in enumerate(storf_group):
-        sl = len(storf[1][1])
-        start_codon = storf[1][1][0:3]
-        stop_codon = storf[1][1][sl - 4:sl - 1]
+        sl = len(storf[1])
+        start_codon = storf[1][0:3]
+        stop_codon = storf[1][sl - 4:sl - 1]
         if start_codon not in allowed_codons or stop_codon not in allowed_codons:
-            storf_group_values[i][1] *= 0
+            storf_group_values[i][1] = 0
     return storf_group_values
 
 
@@ -320,15 +327,17 @@ def is_next_new_group(storfs: list, storf_id: int, total_num_storfs: int) -> boo
     return overlap_num == 0
 
 
-def read_fasta() -> list:
+def read_fasta(file_name=None) -> list:
     """
     Convert unannotated genome ".fasta" file to a list of StORFs.
     :return: (list) A list of all StORFs in fasta file input
     """
     unfiltered_storfs = []
-    #print(OPTIONS.fasta)
-    #exit()
-    with open(OPTIONS.fasta) as storf_file:
+    if file_name == None:
+        file = OPTIONS.fasta
+    else:
+        file = file_name 
+    with open(file) as storf_file:
         for line in storf_file:
             if line[0] == ">":
                 unfiltered_storfs.append([line, next(storf_file)])
@@ -443,6 +452,10 @@ def def_user_filter_args(storfs):
         FILTERS["max_olap"] = OPTIONS.max_olap
         if OPTIONS.min_olap is None or OPTIONS.max_olap is None:
             set_overlap_bounds(storfs)
+    if not OPTIONS.disable_olap_count:
+        FILTERS["max_olap_count"] = OPTIONS.max_olap_count
+        if OPTIONS.max_olap_count is None:
+            FILTERS["max_olap_count"] = OLAP_COUNT_UB
     if not OPTIONS.disable_gc:
         FILTERS["min_gc"] = OPTIONS.min_gc
         FILTERS["max_gc"] = OPTIONS.max_gc
@@ -454,10 +467,11 @@ def def_user_filter_args(storfs):
 
 def print_all_filter_params(storfs: list) -> None:
     print(FILTERS)
-    if OPTIONS.total_cap == -1:
-        print(f"Total weight capacity: {round(len(storfs) * STORF_CAP_PERCENTAGE)}")
-    else:
-        print(f"Total weight capacity: {OPTIONS.total_cap}")
+    if not OPTIONS.basic_filter:
+        if OPTIONS.total_cap == -1:
+            print(f"Total weight capacity: {round(len(storfs) * STORF_CAP_PERCENTAGE)}")
+        else:
+            print(f"Total weight capacity: {OPTIONS.total_cap}")
     exit()
 
 
@@ -469,6 +483,7 @@ def set_filters(storfs) -> None:
         FILTERS['min_orf'] = 100
         FILTERS['max_orf'] = 50000
         OPTIONS.disable_ecdf_relaxation = True
+        OPTIONS.disable_olap_count = True
         OPTIONS.total_cap = len(storfs)
         if OPTIONS.print_filter_params:
             print_all_filter_params(storfs)
@@ -560,6 +575,8 @@ def init_argparse():
                         help='Maximum StORF overlap size (nt)')
     parser.add_argument('-max_olap', action="store", dest='max_olap', type=int,
                         help='Maximum StORF overlap size (nt)')
+    parser.add_argument('-max_olap_count', action="store", dest='max_olap_count', type=int,
+                        help='Maximum number of overlaps per StORF')
     parser.add_argument('-min_gc', action="store", dest='min_gc', type=float,
                         help='Minimum gc percentage of StORFs as float')
     parser.add_argument('-max_gc', action="store", dest='max_gc', type=float,
