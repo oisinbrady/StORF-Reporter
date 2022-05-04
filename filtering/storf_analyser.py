@@ -1,11 +1,11 @@
-import csv
-import os
-import re
-from itertools import combinations
+import csv  # for cumulative metrics of MO URs
+import os  # to help find necessary files
+import re  # to find specific bases in StORF sequences
+from itertools import combinations  # get combinations of 2D-PCA plots
 
-import matplotlib.pyplot as plt
-import pandas as pd
-import seaborn as sns
+import matplotlib.pyplot as plt  # to render plots made from seaborn
+import pandas as pd  # StORF metrics represented as dataframes: useful for seaborn functions
+import seaborn as sns  # allows plotting of PCA graphs
 import random as rand
 import argparse
 
@@ -204,14 +204,16 @@ def codon_metric(storfs: list):
 
 def write_csv_summary(cumulative: pd.DataFrame, filtered: list, unfiltered: list, all_hss_groups: list,
                       filt_type: str) -> None:
+    # prepare the cumulative metrics for all six MO URs
     file_path = ABSPATH + f"/metrics/output/{filt_type}_summary_metrics.csv"
+    # the column titles of the CSV output; all additions to "data" list are in this order
     header = [
         "mean StORF size(normalised)", "mean overlap size(normalised)", "unfiltered StORFs",
         "filtered StORFs", "total unfiltered HSS", "total filtered HSS", "total HSS lost",
         "HSS_1 unfiltered", "HSS_1 filtered", "HSS_1 lost", "HSS_2 unfiltered", "HSS_2 filtered",
         "HSS_2 lost"
     ]
-    _, cumulative = normalise_dataframe(cumulative)
+    _, cumulative = normalise_dataframe(cumulative)  # ignore the original dataframe returned
     data = []
     total_size = 0
     total_overlap_size = 0
@@ -254,15 +256,17 @@ def write_csv_summary(cumulative: pd.DataFrame, filtered: list, unfiltered: list
 
 
 def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
+    #
     all_storf_metrics = []
     con_groups = get_con_groups(storf_set)
     for group in con_groups:
-        # get metrics for each contig StORF group
+        # get the following metrics for each contig StORF group:
         gc_perc = gc_metric(group)
         start_codons, stop_codons = codon_metric(group)
         lengths = [len(s[1]) for s in group]
         overlaps = get_overlaps(group)  # list of (1 to 1/Many)
-        group_metrics = [[] for i in group]
+        group_metrics = [[] for i in group]  # metrics for all StORFs in contig
+        # compile all metrics into one list
         for i in range(0, len(group_metrics)):
             if len(overlaps) > 0:
                 storf_total_overlaps = len(overlaps)
@@ -280,13 +284,15 @@ def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
         for storf_metrics in group_metrics:
             for metric in storf_metrics:
                 all_storf_metrics.append(metric)
-    data = pd.DataFrame(all_storf_metrics)
-    if len(data) > 0:
+    data = pd.DataFrame(all_storf_metrics)  # convert into dataframe: makes seaborn plotting easier
+    if len(data) > 0:  # add names to each column for later reference
         data.columns = ["gc_percentage", "size", "average_overlap_size", "total_overlaps", "start_codon", "stop_codon"]
     return data
 
 
 def monte_carlo_subsambple(data: list, subsample_percentage: float) -> pd.DataFrame:
+    # DEPRECATED: MO URs are not large enough to need this, however could be considered for future (larger) samples
+    # collect random StORF samples from a specific percentage of the dataset
     samples = 0
     subsamples = []
     subsample_chosen_indices = []
@@ -302,6 +308,7 @@ def monte_carlo_subsambple(data: list, subsample_percentage: float) -> pd.DataFr
 
 
 def plot_ecdf(data: list, genome_name: str, x_title: str) -> None:
+    # ECDF plot; currently, only use is for size of StORFs (x-axis)
     file_name = x_title.replace(" ", "_")
     if genome_name == "all":
         graph_path = ABSPATH + f"/metrics/output/"
@@ -315,8 +322,8 @@ def plot_ecdf(data: list, genome_name: str, x_title: str) -> None:
     plt.close()
 
 
-def get_hss_coverage() -> list:
-    # TODO
+def get_hss_coverage():
+    # TODO future analytic
     return
 
 
@@ -357,12 +364,11 @@ def plot_quantile_points(df: pd.DataFrame, ax: plt.Axes, metric: str) -> None:
         x_offset += 1
 
 
-def get_quantiles(df: pd.DataFrame, ax: plt.Axes, pc: str) -> list:
+def get_quantiles(df: pd.DataFrame, pc: str) -> list:
     # pc = principle component
-    storf_set_types = []
-    storf_set_types.append(df.loc[df['set_type'] == "non-CDS StORFs"])
-    storf_set_types.append(df.loc[df['set_type'] == "HSS_2"])
-    storf_set_types.append(df.loc[df['set_type'] == "HSS_1"])
+    storf_set_types = [df.loc[df['set_type'] == "non-CDS StORFs"],
+                       df.loc[df['set_type'] == "HSS_2"],
+                       df.loc[df['set_type'] == "HSS_1"]]
     set_quantiles = []
     for set_type in storf_set_types:
         q1 = set_type.dropna()[pc].quantile(0.25)
@@ -381,54 +387,66 @@ def get_quantiles(df: pd.DataFrame, ax: plt.Axes, pc: str) -> list:
     return set_quantiles
 
 
-def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
-    summary = genome_name == "all"
-    if summary:
-        print("\nPlotting cumulative genome 2D PCAs...")
+def set_scatter_plot(pc1, pc2, data, palette) -> None:
+    ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
+    ax.set(xlabel=f'{pc2.replace("_", " ")} {x_max}')
+    plt.legend(title='StORF type', labels=['Non-HSS StORFs', 'HSS 1', 'HSS 2'])
+    leg = ax.get_legend()
+    leg.legendHandles[0].set_color('grey')  # tab:grey
+    leg.legendHandles[1].set_color('blue')
+    leg.legendHandles[2].set_color('green')
+
+
+def set_count_plot(data, palette) -> None:
+    print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
+    hss_1_data = data.loc[data['set_type'] == 'HSS_1']
+    hss_2_data = data.loc[data['set_type'] == 'HSS_2']
+    non_cds_data = data.loc[data['set_type'] == 'non-CDS StORFs']
+    count_data = [non_cds_data, hss_1_data, hss_2_data]
+    for i, set_type in enumerate(palette):
+        color = palette[set_type]
+        sns.countplot(data=count_data[i], x="start_codon", color=color)
+        plt.savefig(graph_path + f"/{set_type.replace(' ', '_')}_start_codons.png")
+        sns.countplot(data=count_data[i], x="stop_codon", color=color)
+        plt.savefig(graph_path + f"/{set_type.replace(' ', '_')}_stop_codons.png")
+        plt.close()
+
+
+def set_boxplot(pc1, pc2, data, palette) -> None:
+    ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
+    ax.set(xlabel=f'{pc2.replace("_", " ")}')
+    if pc1 != "set_type":
+        plot_quantile_points(data, ax, pc1)  # labels for quantile values in box-plots
     else:
-        print("\t\tplotting 2D PCAs...")
+        plot_quantile_points(data, ax, pc2)
+
+
+def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
+    # plot 2D Principal Component Graphs for StORF metrics
+    summary = genome_name == "all"
+    print("\nPlotting cumulative genome 2D PCAs...") if summary else print("\t\tplotting 2D PCAs...")
     graph_path = ABSPATH + f"/metrics/output/cumulative_pca" if summary else ABSPATH + f"/metrics/output/{genome_name}/pca"
     original_data, data = normalise_dataframe(data)
-    pca_2d_perm = list(combinations(data.columns, 2))
-    restrict = ["start_codon", "stop_codon"]
+    pca_2d_perm = list(combinations(data.columns, 2))  # every possible combination of 2D metric
+    restrict = ["start_codon", "stop_codon"]  # restrict the PCAs plotted for these StORF components
     for perm in pca_2d_perm:
         pc1 = perm[0]
         pc2 = perm[1]
         if pc1 not in restrict and pc2 not in restrict:
             print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
+        # coloring to represent each StORF type
         palette = {"non-CDS StORFs": "tab:grey", "HSS_1": "tab:blue", "HSS_2": "tab:green"}
         x_max, y_max = get_plot_axis_units(original_data, pc1, pc2)
         if pc1 == "set_type" or pc2 == "set_type":
             if "codon" not in pc1 and "codon" not in pc2:
-                ax = sns.boxplot(x=pc2, y=pc1, data=data, palette=palette)
-                ax.set(xlabel=f'{pc2.replace("_", " ")}')
-                if pc1 != "set_type":
-                    plot_quantile_points(data, ax, pc1)
-                else:
-                    plot_quantile_points(data, ax, pc2)
+                set_boxplot(pc1, pc2, data, palette)
         elif pc1 not in restrict and pc2 not in restrict:
-            ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
-            ax.set(xlabel=f'{pc2.replace("_", " ")} {x_max}')
-            plt.legend(title='StORF type', labels=['Non-CDS StORFs', 'HSS 1', 'HSS 2'])
-            leg = ax.get_legend()
-            leg.legendHandles[0].set_color('grey')  # tab:grey
-            leg.legendHandles[1].set_color('blue')
-            leg.legendHandles[2].set_color('green')
+            set_scatter_plot(pc1, pc2, data, palette)  # scatter plots of principal components
         else:
             if summary and pc1 in restrict and pc2 in restrict:
-                print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
-                hss_1_data = data.loc[data['set_type'] == 'HSS_1']
-                hss_2_data = data.loc[data['set_type'] == 'HSS_2']
-                non_CDS_data = data.loc[data['set_type'] == 'non-CDS StORFs']
-                count_data = [non_CDS_data, hss_1_data, hss_2_data]
-                for i, set_type in enumerate(palette):
-                    color = palette[set_type]
-                    sns.countplot(data=count_data[i], x="start_codon", color=color)
-                    plt.savefig(graph_path + f"/{set_type.replace(' ', '_')}_start_codons.png")
-                    sns.countplot(data=count_data[i], x="stop_codon", color=color)
-                    plt.savefig(graph_path + f"/{set_type.replace(' ', '_')}_stop_codons.png")
-                    plt.close()
-                return None
+                set_count_plot(data, palette)  # count plots (~histograms) of stop codons
+                return
+        # set axis labels dependent on principle component
         if y_max == "":
             ylabel = f'{pc1.replace("_", " ")}'
         else:
@@ -439,25 +457,15 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
         plt.close()
 
 
-def set_dataframe_group_identities(hss_data: list, group_identities: list) -> None:
-    hss_data['set_type'] = 'N.a'
-    for group_id, locus in enumerate(group_identities):
-        start = locus[0]
-        stop = locus[1] + 1
-        for i in range(start, stop):
-            hss_data.at[i, 'set_type'] = f"HSS_{group_id + 1}"
-
-
 def print_hss_group_info(hss_groups) -> None:
-    print_str = []
-    print_str.append(f"\tHSS_1: {len(hss_groups.get('HSS_1'))}\n")
-    print_str.append(f"\tHSS_2: {len(hss_groups.get('HSS_2'))}")
+    print_str = [f"\tHSS_1: {len(hss_groups.get('HSS_1'))}\n", f"\tHSS_2: {len(hss_groups.get('HSS_2'))}"]
     sum_hss = len(hss_groups.get('HSS_1')) + len(hss_groups.get('HSS_2'))
     print(*print_str)
     print(f"\tTotal HSS: {sum_hss}\n")
 
 
 def metric_one_genome() -> None:
+    # individual metrics from one UR
     unfiltered_storfs = read_unfiltered(OPTIONS.unfilt)
     filt = read_filtered(OPTIONS.filt)
     contigs = get_con_groups(unfiltered_storfs)
@@ -471,14 +479,12 @@ def metric_one_genome() -> None:
     ave_storf_size = cumulative_storf_size/len(unfiltered_storfs)
     blastx_matches = read_blastx(OPTIONS.blastx)
     uf_hss_groups = get_hss_groups(unfiltered_storfs, blastx_matches)
-
     print(f"Average StORF size: {ave_storf_size}")
     print(f"Total Contigs: {len(contigs)}")
     print(f"Average Contig Size: {ave_contig_size}")
     print(f"\nunfiltered StORFs: {len(unfiltered_storfs)}")
     print_hss_group_info(uf_hss_groups)
     print(f"filtered StORFs: {len(filt)}")
-
     filt_hss_1 = [s for s in filt if s in uf_hss_groups["HSS_1"]]
     filt_hss_2 = [s for s in filt if s in uf_hss_groups["HSS_2"]]
     hss_groups = {"HSS_1": filt_hss_1, "HSS_2": filt_hss_2}
@@ -486,15 +492,15 @@ def metric_one_genome() -> None:
 
 
 def metrics() -> None:
-    # for manual file simple metric
     if OPTIONS.unfilt is not None:
+        # for manual file simple metric
         metric_one_genome()
         exit()
     cumulative_dataframe = pd.DataFrame()
     # list of each genome containing a list of each HSS group
     all_hss_groups = [{"HSS_1": None, "HSS_2": None} for i in range(0, len(UNFILTERED_UR))]
     all_unfiltered = []
-    # For each genome, produce metrics
+    # For each genome: produce metrics
     for i in range(0, len(UNFILTERED_UR)):
         genome_name = UNFILTERED_UR[i][UNFILTERED_UR[i].find("/") + 1:UNFILTERED_UR[i].find("_")]
         print(f"\nProcessing {genome_name} UR...")

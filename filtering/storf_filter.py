@@ -1,10 +1,11 @@
-import collections
+import collections  # for ordered dictionary operations
 import re  # for StORF sequence identifications (e.g. GC-content)
 import pulp  # for IP modelling and solving
 import argparse  # for command line argument parsing
 import time  # for run time measurements
-from math import ceil, floor
+from math import ceil, floor  # for rounding in "plateau point" calculations
 
+# constants used as filtering bounds
 from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, OLAP_COUNT_UB, ARB_MAX_STORF_SIZE, \
     ARB_MAX_OLAP_SIZE
 
@@ -51,26 +52,25 @@ def get_storf_loc(storf: list) -> tuple[int, int]:
     :return: (tuple(intA, intB)) intA=start location, intB=stop location
     """
     storf_x_meta = storf[0]
-    # print(storf_x_meta)
-    # exit()
     locus = storf_x_meta[storf_x_meta.find(":") + 1:storf_x_meta.find("|")]
     start = int(locus[:locus.find("-")])
     stop = int(locus[locus.find("-") + 1:])
     return start, stop
 
 
-def is_plateau(percentile_bound: tuple[float, float], initial_m: float, storfs: list) -> bool:
-    # assume plateau as a rate of change (m) that is less than theta * initial_m
+def is_plateau(percentile_bound: list, initial_m: float, storfs: list) -> bool:
+    # assume plateau as a difference in rate of change (m) that is less than theta (0.01)
     theta = 0.01  # threshold
     m = rate_of_change(percentile_bound, storfs)
     return m / initial_m < theta
 
 
-def rate_of_change(percentile_bound: tuple[float, float], storfs: list) -> float:
-    lb = percentile_bound[0]
+def rate_of_change(percentile_bound: list, storfs: list) -> float:
+    lb = percentile_bound[0]  # bounds of the ECDF percentile group
     ub = percentile_bound[1]
-    lb_index = floor(lb * len(storfs))
+    lb_index = floor(lb * len(storfs))  # get the StORFs at bounds
     ub_index = ceil(ub * len(storfs))
+    # return delta y (y-axis: percentile range) / delta x (x-axis: StORF size range)
     delta_x = len(storfs[ub_index][1]) - len(storfs[lb_index][1])
     delta_y = ub - lb
     return delta_y / delta_x
@@ -83,13 +83,14 @@ def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
     percentile_bound = [0.0, 0.5]
     initial_m = rate_of_change(percentile_bound, sorted_storfs)
     i = 0
-    lim = 100000
+    lim = 100000  # hard limit in-case no plateau region is detected
     while not is_plateau(percentile_bound, initial_m, sorted_storfs) and i < lim:
-        lb = percentile_bound[1]
-        ub = (1 - lb) / 2 + lb
+        # if difference in rate of change is not enough to be a plateau
+        lb = percentile_bound[1]  # lower bound becomes previous upper bound
+        ub = (1 - lb) / 2 + lb  # new upper bound definition
         percentile_bound = [lb, ub]  # move to the next percentile slot of StORFs
         i += 1
-    # mid point of percentile bound
+    # mid-point of percentile bound
     mp = ((percentile_bound[1] - percentile_bound[0]) / 2) + percentile_bound[0]
     mp_index = floor(mp * len(sorted_storfs))
     # determine max StORF length where filtering will be applied
@@ -99,8 +100,7 @@ def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
 def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     """
     Assign a value of 0 to all StORFs in group that don't satisfy the overlapping constraints.
-    I.e., Get the highest valued StORF(s) obeying knapsack constraints.
-    Logic is as follows:
+    Logic is as follows, for each contig:
         - Return at least one StORF of the highest value
         Exclude:
             - any overlapping StORFs outside defined overlap range
@@ -153,7 +153,6 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     for i, storf in enumerate(storf_group_values):
         if storf[0] not in selected:
             storf[1] = 0  # change value to filter out disallowed StORFs
-
         # inelegant work-around for unit-testing - b/c unable to mock OPTIONS env variable
         try:
             if not FILTERS.get('test_disable_o_count') or not OPTIONS.disable_olap_count:
@@ -167,13 +166,7 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
 
 
 def filter_by_size_range(storf_group_values: list, storf_group: list) -> list:
-    """
-    Assign a coefficient value of 0 to all StORFs in group that don't satisfy the size constraint.
-    I.e., filter out StORFs that are too large/small
-    :param storf_group_values: (list) current coefficient values of StORFs in group
-    :param storf_group: (list) a contiguous region of StORFs containing some overlaps
-    :return: (list) An adjusted list of StORF values according to size constraint
-    """
+    # remove StORFs not in the allowed size range
     min_l, max_l = FILTERS.get('min_orf'), FILTERS.get('max_orf')
     for i, storf in enumerate(storf_group):
         if not min_l <= len(re.findall('[AGCT]', storf[1])) <= max_l:
@@ -182,13 +175,7 @@ def filter_by_size_range(storf_group_values: list, storf_group: list) -> list:
 
 
 def filter_by_gc_range(storf_group_values: list, storf_group: list) -> list:
-    """
-    Assign a coefficient value of 0 to all StORFs in group that don't satisfy the gc constraint.
-    I.e., filter out StORFs that are not within a percentage deviation of the average gc
-    :param storf_group_values: (list) Current coefficient values of StORFs in group
-    :param storf_group: (list) A contiguous region of StORFs containing some overlaps
-    :return: (list) An adjusted list of StORF values according to gc constraint
-    """
+    # remove StORFs not in the allowed GC range
     for i, storf in enumerate(storf_group):
         total_len = len(re.findall('[AGCT]', storf[1]))
         if not FILTERS.get('min_gc') <= len(re.findall('[GC]', storf[1])) / total_len <= FILTERS.get('max_gc'):
@@ -197,14 +184,7 @@ def filter_by_gc_range(storf_group_values: list, storf_group: list) -> list:
 
 
 def filter_by_stop_codons(storf_group_values: list, storf_group: list) -> list:
-    """
-    Assign a coefficient value of 0 to all StORFs in group that don't satisfy the stop codon 
-    constraint.
-    I.e., filter out StORFs that don't start and end with one of the allowed stop codons
-    :param storf_group_values: (list) Current coefficient values of StORFs in group
-    :param storf_group: (list) A contiguous region of StORFs containing some overlaps
-    :return: (list) An adjusted list of StORF values according to stop codons
-    """
+    # remove StORFs that don't start AND end in the allowed stop-codons
     allowed_codons = FILTERS.get('stop_codons')
     for i, storf in enumerate(storf_group):
         sl = len(storf[1])
@@ -216,6 +196,7 @@ def filter_by_stop_codons(storf_group_values: list, storf_group: list) -> list:
 
 
 def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
+    # DEPRECATED IP FUNCTION
     """
     Adjust the coefficient value of all StORFs in group according to their length.
     :param storf_group_values: (list) Current coefficient values of StORFs in group
@@ -228,6 +209,7 @@ def filter_favour_length(storf_group_values: list, storf_group: list) -> list:
 
 
 def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
+    # DEPRECATED IP FUNCTION
     """
     Adjust the coefficient value of all StORFs in group according to their gc-content.
     :param storf_group_values: (list) Current coefficient values of StORFs in group.
@@ -252,6 +234,7 @@ def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode
 
 
 def filter_favour_gc_by_len(storf_group_values: list, storf_group: list) -> list:
+    # DEPRECATED IP FUNCTION
     for i, storf in enumerate(storf_group):
         storf_len = len(re.findall('[AGCT]', storf[1]))
         storf_gc = len(re.findall('[GC]', storf[1]))
@@ -262,6 +245,7 @@ def filter_favour_gc_by_len(storf_group_values: list, storf_group: list) -> list
 
 
 def ip_set_weighted_values(storf_contig_values: list, contig_group: list) -> list:
+    # DEPRECATE IP FUNCTION
     # WEIGHTED VALUE FILTERS: coefficient values equivalent to attributes of StORF, e.g. length
     # Only makes a difference if knapsack capacity constraints are a factor
     if OPTIONS.len_weighted_value:
@@ -288,6 +272,7 @@ def filter_by_bounds(storf_contig_values: list, contig_group: list) -> list:
 
 
 def set_group_values(contig_group: list) -> list:
+    # DEPRECATED IP FUNCTION
     """
     Adjust the coefficient value of all StORFs in group according to the user defined filters.
     :param contig_group: (list) A contiguous region of StORFs containing some overlap
@@ -420,7 +405,7 @@ def set_overlap_bounds(storfs) -> None:
 
 def set_orf_bounds(storfs) -> None:
     if FILTERS.get("min_orf") is None:
-        # size based of cumulative distribution PCA size vs gc-content scatterplot
+        # size based of cumulative distribution PCA size vs gc-content scatter-plot
         FILTERS['min_orf'] = SIZE_LB
     if FILTERS.get("max_orf") is None:
         FILTERS['max_orf'] = ARB_MAX_STORF_SIZE
@@ -499,14 +484,13 @@ def ip_process_output(prob: pulp.LpProblem, storfs: list) -> list:
 
 
 def basic_filter(storfs: list) -> list:
-    # filter by bounds
     selected = []  # 1=selected, 0=not-selected
     contigs = get_con_groups(storfs)
     for g, contig in enumerate(contigs):
         contig_values = [[s[0], 1] for s in contig]  # default all StORFs to selected
-        selected += filter_by_bounds(contig_values, contig)
+        selected += filter_by_bounds(contig_values, contig)  # filter according to bounds
     filtered_storfs = []
-
+    # prepare output
     for i, storf_data in enumerate(selected):
         is_selected = storf_data[1]
         storf_fasta = storfs[i]  # StORF meta data and sequence
@@ -516,19 +500,17 @@ def basic_filter(storfs: list) -> list:
 
 
 def ip_filter(storfs: list) -> list:
-    # filter by weighted values (+ optional bounds)
+    # DEPRECATED IP FUNCTION
     """
-    Filter StORFs in unannotated genome file using integer programming
-    :param storfs: (list) all StORFs in unannotated genome
-    :return: (list) optimal IP solution of selected StORFs
-    """
-    """
-    Knapsack problem: 
+    Filter StORFs in unannotated genome file using integer programming.
+    Knapsack problem:
     - Weight of each StORF = 1
     - The following default to infinity:
         - gc = capacity on number of selected StORFs in each group (sub-knapsack)
         - tc = capacity of total selected StORFs
     - All other constraints are selected by the user and so the model is defined accordingly
+    :param storfs: (list) all StORFs in unannotated genome
+    :return: (list) optimal IP solution of selected StORFs
     """
     # initialise IP instance
     prob = pulp.LpProblem("StORF_IP_Filter", pulp.LpMaximize)
@@ -537,12 +519,10 @@ def ip_filter(storfs: list) -> list:
     storf_ids = [f"x_{s}" for s in range(0, s_total)]
     ip_vars = [pulp.LpVariable(storf_ids[i], lowBound=0, upBound=1, cat='Integer') for i in range(0, s_total)]
     obj_values = []
-
     # value-setting of IP vars to filter unwanted StORFs
     contigs = get_con_groups(storfs)
     for g, contig in enumerate(contigs):
         obj_values += set_group_values(contig)
-
     # construct objective function (auto-adds IP variable bounds)
     ip_set_obj_func(prob, obj_values, ip_vars)
     ip_set_total_constraint(prob, ip_vars)  # add knapsack sum capacity constraint
@@ -572,35 +552,35 @@ def init_argparse():
                         help='Maximum gc percentage of StORFs as float')
     parser.add_argument('-codons', action="store", dest='stop_codons', default="TAG,TGA,TAA",
                         help='Default - (\'TAG,TGA,TAA\'): List Stop Codons to use')
-
+    # filtering using IP method: DEPRECATED
+    parser.add_argument('-ip', action="store_true", dest='kpip_filter',
+                        help='filter by basic bounds for StORF attributes')
     parser.add_argument('-ip_v_l', action="store_true", dest='len_weighted_value',
                         help='Let IP favour StORF selection by size')
     parser.add_argument('-ip_v_gc', action="store_true", dest='gc_weighted_value',
                         help='Let IP favour StORF selection by gc content'),
     parser.add_argument('-ip_v_gcl', action="store_true", dest='len_gc_weighted_value',
                         help='Let IP favour StORF length * GC percentage'),
-
-    parser.add_argument('-ip', action="store_true", dest='kpip_filter',
-                        help='filter by basic bounds for StORF attributes')
-    # TODO CHANGE HELP STRING FOR DEFAULTS
+    # ip weight capacity
     parser.add_argument('-cap', action="store", dest='total_cap', type=int, default=-1,
                         help='Default - infinity/No capacity: set IP maximum StORF selection capacity')
+    # mimic original StORF filtering ("StORF-Reporter")
+    parser.add_argument('-original_filter', action="store_true", dest='original_filter',
+                        help='Set all filtering parameters equal to StORF_finder.py')
+    # the following commands allow certain filtering methods to be disabled at run-time
     parser.add_argument('-d_gc', action="store_true", dest='disable_gc',
                         help='Disable filtering by GC content')
     parser.add_argument('-d_olap', action="store_true", dest='disable_olap',
                         help='Disable filtering by overlap size (nt)')
-    # TODO HELP DESCRIPTION
     parser.add_argument('-d_olap_count', action="store_true", dest='disable_olap_count',
                         help='')
     parser.add_argument('-d_size', action="store_true", dest='disable_size_filter',
                         help='Disable filtering by StORF size (nt)'),
     parser.add_argument('-d_ecdf', action="store_true", dest='disable_ecdf_relaxation',
                         help='Disable relaxation of filtering for the largest StORFs (using ECDF plateau region)'),
-    parser.add_argument('-original_filter', action="store_true", dest='original_filter',
-                        help='Set all filtering parameters equal to StORF_finder.py')
+    # Utility/Debug arguments
     parser.add_argument('-print_params', action="store_true", dest='print_filter_params',
                         help='Print all filters after pre-calculations')
-
     parser.add_argument('-run_time', action="store_true", dest='run_time',
                         help='Print total program execution time')
 
