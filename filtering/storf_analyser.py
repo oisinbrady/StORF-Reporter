@@ -403,7 +403,7 @@ def set_scatter_plot(pc1, pc2, data, palette, x_max, y_max) -> None:
     ax.set(ylabel=ylabel)
 
 
-def set_count_plot(data, palette) -> None:
+def set_count_plot(data, palette, genome_name, pc1, pc2, graph_path) -> None:
     print(f"\t\twriting to: metrics/output/{genome_name}_{pc2}_{pc1}_pca.png")
     hss_1_data = data.loc[data['set_type'] == 'HSS_1']
     hss_2_data = data.loc[data['set_type'] == 'HSS_2']
@@ -450,7 +450,7 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
             set_scatter_plot(pc1, pc2, data, palette, x_max, y_max)
         else:
             if summary and pc1 in restrict and pc2 in restrict:
-                set_count_plot(data, palette)  # count plots (~histograms) of stop codons
+                set_count_plot(data, palette, genome_name, pc1, pc2, graph_path)  # count plots (~histograms) of stop codons
                 return
         if pc1 not in restrict and pc2 not in restrict:
             plt.savefig(graph_path + f"/{genome_name}_{pc2}_{pc1}_pca.png")

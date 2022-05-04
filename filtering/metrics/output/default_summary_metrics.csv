@@ -1,2 +1,2 @@
 mean StORF size(normalised),mean overlap size(normalised),unfiltered StORFs,filtered StORFs,total unfiltered HSS,total filtered HSS,total HSS lost,HSS_1 unfiltered,HSS_1 filtered,HSS_1 lost,HSS_2 unfiltered,HSS_2 filtered,HSS_2 lost
-0.014107149209991222,0.04720633139693046,23759,552,1299,368,931,292,203,89,1007,165,842
+0.014107149209991222,0.04720633139693046,23759,1431,1299,563,736,292,255,37,1007,308,699
