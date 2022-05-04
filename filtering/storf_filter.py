@@ -2,15 +2,11 @@ import collections
 import re  # for StORF sequence identifications (e.g. GC-content)
 import pulp  # for IP modelling and solving
 import argparse  # for command line argument parsing
-import pandas as pd
 import time  # for run time measurements
-from enum import Enum
-from itertools import product
 from math import ceil, floor
-from typing import Union
 
-from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, OLAP_COUNT_UB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
-
+from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, OLAP_COUNT_UB, ARB_MAX_STORF_SIZE, \
+    ARB_MAX_OLAP_SIZE
 
 # set by argparse at run-time
 FILTERS = {
@@ -55,8 +51,8 @@ def get_storf_loc(storf: list) -> tuple[int, int]:
     :return: (tuple(intA, intB)) intA=start location, intB=stop location
     """
     storf_x_meta = storf[0]
-    #print(storf_x_meta)
-    #exit()
+    # print(storf_x_meta)
+    # exit()
     locus = storf_x_meta[storf_x_meta.find(":") + 1:storf_x_meta.find("|")]
     start = int(locus[:locus.find("-")])
     stop = int(locus[locus.find("-") + 1:])
@@ -77,7 +73,7 @@ def rate_of_change(percentile_bound: tuple[float, float], storfs: list) -> float
     ub_index = ceil(ub * len(storfs))
     delta_x = len(storfs[ub_index][1]) - len(storfs[lb_index][1])
     delta_y = ub - lb
-    return delta_y / delta_x 
+    return delta_y / delta_x
 
 
 def get_len_ecdf_plateau(unfiltered_storfs: list) -> int:
@@ -132,8 +128,6 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
         overlaps_x = 0  # number of overlaps of StORF x
         while j < length:
             start_y, stop_y = get_storf_loc(sorted_storfs[j])
-            #print(start_x, stop_x)
-            #print(start_y, stop_y)
             if start_y >= stop_x or stop_y <= start_x:
                 # iff no overlap b/w pair
                 j += 1
@@ -159,7 +153,7 @@ def filter_by_overlap(storf_group_values: list, storf_group: list) -> list:
     for i, storf in enumerate(storf_group_values):
         if storf[0] not in selected:
             storf[1] = 0  # change value to filter out disallowed StORFs
-        
+
         # inelegant work-around for unit-testing - b/c unable to mock OPTIONS env variable
         try:
             if not FILTERS.get('test_disable_o_count') or not OPTIONS.disable_olap_count:
@@ -246,7 +240,6 @@ def filter_favour_most_gc(storf_group_values: list, storf_group: list) -> list:
 
 
 def filter_by_mode_stop_codons(storf_group_values: list, storf_group: list, mode_codon: list) -> list:
-    # TODO implement function usage in filtering
     for i, storf in enumerate(storf_group):
         start = storf[1][0].find("Start_Stop=") + len("Start_Stop=")
         start_codon = storf[1][0][start:start + 3]
@@ -316,7 +309,7 @@ def set_group_values(contig_group: list) -> list:
     return storf_contig_values
 
 
-def is_next_new_group(storfs: list, storf_id: int, total_num_storfs: int) -> bool:
+def is_next_new_group(storfs: list, storf_id: int) -> bool:
     if storf_id == 0:
         return False
     colon_delim, pipe_delim = get_storf_delim(storfs[storf_id])
@@ -336,7 +329,7 @@ def read_fasta(file_name=None) -> list:
     if file_name == None:
         file = OPTIONS.fasta
     else:
-        file = file_name 
+        file = file_name
     with open(file) as storf_file:
         for line in storf_file:
             if line[0] == ">":
@@ -405,9 +398,8 @@ def propability_distribution(x_sorted_storfs: list, percentiles: list) -> list:
 def get_con_groups(storfs: list) -> list:
     con_groups = []
     con_group = []
-    total_storfs = len(storfs)
     for i, storf in enumerate(storfs):
-        if is_next_new_group(storfs, i, total_storfs):
+        if is_next_new_group(storfs, i):
             con_groups.append(con_group)
             con_group = [storf]
         else:
@@ -444,7 +436,7 @@ def set_gc_bounds(storfs) -> None:
 def def_user_filter_args(storfs):
     if not OPTIONS.disable_size_filter:
         FILTERS["min_orf"] = OPTIONS.min_orf
-        FILTERS["max_orf"] = OPTIONS.max_orf 
+        FILTERS["max_orf"] = OPTIONS.max_orf
         if OPTIONS.min_orf is None or OPTIONS.max_orf is None:
             set_orf_bounds(storfs)
     if not OPTIONS.disable_olap:
@@ -488,7 +480,6 @@ def set_filters(storfs) -> None:
         if OPTIONS.print_filter_params:
             print_all_filter_params(storfs)
         return None
-    # TODO REFACTOR set according to constants which are based of cumulative PCAs
     def_user_filter_args(storfs)
     FILTERS['plateau_value'] = get_len_ecdf_plateau(storfs) if not OPTIONS.disable_ecdf_relaxation else None
     if OPTIONS.print_filter_params:
@@ -522,7 +513,6 @@ def basic_filter(storfs: list) -> list:
         if is_selected:
             filtered_storfs.append(storf_fasta)
     return filtered_storfs
-        
 
 
 def ip_filter(storfs: list) -> list:
@@ -561,7 +551,6 @@ def ip_filter(storfs: list) -> list:
 
 
 def init_argparse():
-    # TODO add/update help string for all arguments
     parser = argparse.ArgumentParser(description='StORF filtering parameters')
     parser.add_argument('-f', action="store", dest='fasta', required=True,
                         help='Input FASTA File')
@@ -571,7 +560,7 @@ def init_argparse():
                         help='Minimum StORF size (nt)')
     parser.add_argument('-max_orf', action="store", dest='max_orf', type=int,
                         help='Maximum StORF size (nt)')
-    parser.add_argument('-min_olap', action="store", dest='min_olap', type=int, 
+    parser.add_argument('-min_olap', action="store", dest='min_olap', type=int,
                         help='Maximum StORF overlap size (nt)')
     parser.add_argument('-max_olap', action="store", dest='max_olap', type=int,
                         help='Maximum StORF overlap size (nt)')
@@ -584,14 +573,12 @@ def init_argparse():
     parser.add_argument('-codons', action="store", dest='stop_codons', default="TAG,TGA,TAA",
                         help='Default - (\'TAG,TGA,TAA\'): List Stop Codons to use')
 
-
     parser.add_argument('-ip_v_l', action="store_true", dest='len_weighted_value',
                         help='Let IP favour StORF selection by size')
     parser.add_argument('-ip_v_gc', action="store_true", dest='gc_weighted_value',
                         help='Let IP favour StORF selection by gc content'),
     parser.add_argument('-ip_v_gcl', action="store_true", dest='len_gc_weighted_value',
                         help='Let IP favour StORF length * GC percentage'),
-
 
     parser.add_argument('-ip', action="store_true", dest='kpip_filter',
                         help='filter by basic bounds for StORF attributes')
@@ -641,4 +628,3 @@ if __name__ == '__main__':
     main()
     if OPTIONS.run_time:
         print(f"{time.time() - start_time}")
-

@@ -1,9 +1,6 @@
 import sys; sys.path.insert(1, '../')
-import os
-import argparse
 from unittest import mock, TestCase
 from storf_filter import filter_by_overlap, filter_by_size_range, filter_by_gc_range, filter_by_stop_codons, get_con_groups, read_fasta, FILTERS
-from filter_constants import STORF_CAP_PERCENTAGE, GC_LB, GC_UB, OLAP_LB, SIZE_LB, ARB_MAX_STORF_SIZE, ARB_MAX_OLAP_SIZE
 
 
 class TestFilters(TestCase):
