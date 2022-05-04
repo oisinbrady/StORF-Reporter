@@ -351,7 +351,7 @@ def get_plot_axis_units(data_frame: pd.DataFrame, pc1: str, pc2: str) -> tuple[s
 
 def plot_quantile_points(df: pd.DataFrame, ax: plt.Axes, metric: str) -> None:
     # plot quantiles and whiskers values and arrows
-    set_type_quantiles = get_quantiles(df, ax, metric)
+    set_type_quantiles = get_quantiles(df, metric)
     x_offset = 0.1  # x coordinate for label
     for quantiles in set_type_quantiles:
         for q in quantiles:
@@ -387,7 +387,7 @@ def get_quantiles(df: pd.DataFrame, pc: str) -> list:
     return set_quantiles
 
 
-def set_scatter_plot(pc1, pc2, data, palette) -> None:
+def set_scatter_plot(pc1, pc2, data, palette, x_max, y_max) -> None:
     ax = sns.scatterplot(x=pc2, y=pc1, hue="set_type", data=data, palette=palette, alpha=0.8)
     ax.set(xlabel=f'{pc2.replace("_", " ")} {x_max}')
     plt.legend(title='StORF type', labels=['Non-HSS StORFs', 'HSS 1', 'HSS 2'])
@@ -395,6 +395,12 @@ def set_scatter_plot(pc1, pc2, data, palette) -> None:
     leg.legendHandles[0].set_color('grey')  # tab:grey
     leg.legendHandles[1].set_color('blue')
     leg.legendHandles[2].set_color('green')
+    # set axis labels dependent on principle component
+    if y_max == "":
+        ylabel = f'{pc1.replace("_", " ")}'
+    else:
+        ylabel = f'proportional {pc1.replace("_", " ")} {y_max}'
+    ax.set(ylabel=ylabel)
 
 
 def set_count_plot(data, palette) -> None:
@@ -441,17 +447,11 @@ def plot_pca(data: pd.DataFrame, genome_name: str) -> None:
             if "codon" not in pc1 and "codon" not in pc2:
                 set_boxplot(pc1, pc2, data, palette)
         elif pc1 not in restrict and pc2 not in restrict:
-            set_scatter_plot(pc1, pc2, data, palette)  # scatter plots of principal components
+            set_scatter_plot(pc1, pc2, data, palette, x_max, y_max)
         else:
             if summary and pc1 in restrict and pc2 in restrict:
                 set_count_plot(data, palette)  # count plots (~histograms) of stop codons
                 return
-        # set axis labels dependent on principle component
-        if y_max == "":
-            ylabel = f'{pc1.replace("_", " ")}'
-        else:
-            ylabel = f'proportional {pc1.replace("_", " ")} {y_max}'
-        ax.set(ylabel=ylabel)
         if pc1 not in restrict and pc2 not in restrict:
             plt.savefig(graph_path + f"/{genome_name}_{pc2}_{pc1}_pca.png")
         plt.close()
