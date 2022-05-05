@@ -256,7 +256,7 @@ def write_csv_summary(cumulative: pd.DataFrame, filtered: list, unfiltered: list
 
 
 def get_metrics_dataframe(storf_set: list) -> pd.DataFrame:
-    #
+    # represent StORF metrics as dataframe to use with Seaborn 
     all_storf_metrics = []
     con_groups = get_con_groups(storf_set)
     for group in con_groups:
